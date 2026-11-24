@@ -1,30 +1,33 @@
-FROM vllm/vllm-openai:v0.33.0@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e
+FROM ghcr.io/astral-sh/uv:0.13.9-python3.12-trixie-slim@sha256:b12436aceed37b21524b327362bd67e73a284b5d52f4f6be0e047dd8e4c4eb90
 
-ENV UV_PROJECT_ENVIRONMENT=/opt/llm-lab/venv \
-    UV_PYTHON=/usr/bin/python3.12 \
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never \
-    UV_LINK_MODE=copy \
-    UV_COMPILE_BYTECODE=1
+    PATH=/opt/llm-lab/.venv/bin:/opt/vllm/.venv/bin:$PATH
 
-WORKDIR /opt/llm-lab/src
+WORKDIR /opt/vllm
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=docker/datasets/vllm/pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=docker/datasets/vllm/uv.lock,target=uv.lock \
+    uv sync --locked
 
-RUN --mount=from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d,source=/uv,target=/opt/uv/bin/uv \
-    --mount=type=cache,target=/root/.cache/uv \
+WORKDIR /opt/llm-lab
+RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=uv.lock,target=uv.lock \
-    env -u UV_OVERRIDE -u UV_INDEX_STRATEGY UV_CACHE_DIR=/root/.cache/uv \
-    /opt/uv/bin/uv sync --locked --no-dev --no-install-project
+    uv sync --locked --no-dev --no-install-project
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-
-RUN --mount=from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d,source=/uv,target=/opt/uv/bin/uv \
-    --mount=type=cache,target=/root/.cache/uv \
-    env -u UV_OVERRIDE -u UV_INDEX_STRATEGY UV_CACHE_DIR=/root/.cache/uv \
-    /opt/uv/bin/uv sync --locked --no-dev --no-editable \
- && ln -s /opt/llm-lab/venv/bin/llm-lab /usr/local/bin/llm-lab
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable
 
 COPY --chmod=755 docker/datasets/dataset-job.sh /usr/local/bin/llm-lab-dataset-job
 
 WORKDIR /workspace
 ENTRYPOINT []
+CMD []

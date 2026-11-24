@@ -31,7 +31,7 @@ A recipe has three sections:
 
 4. Set `LLM_LAB_DATASETS_IMAGE` to the reference of that image.
 
-Dataset jobs only rent hosts whose driver supports CUDA 13.0, which the vLLM base image needs. Change `LLM_LAB_DATASETS_IMAGE_MIN_CUDA` when the base image changes.
+Jobs rent only hosts whose driver supports CUDA 13.0 or newer, unless the placement sets another `min_cuda`.
 
 ## Commands
 

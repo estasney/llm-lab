@@ -50,11 +50,7 @@ def submit_dataset(
         raise CommandError("The datasets image is not set. Set the environment variable LLM_LAB_DATASETS_IMAGE.")
     recipe = load_recipe(recipe_path)
     check_new_dataset(recipe, dataset, designer, hub)
-    report(
-        orchestrator.submit(
-            build_dataset_job(recipe, dataset, rows, settings.datasets_image, settings.datasets_image_min_cuda)
-        )
-    )
+    report(orchestrator.submit(build_dataset_job(recipe, dataset, rows, settings.datasets_image)))
 
 
 @app.command("create", help="Serve the model of a recipe with vLLM, generate the dataset and upload it to the Hub.")

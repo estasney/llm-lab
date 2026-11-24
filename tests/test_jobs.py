@@ -572,14 +572,13 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
     assert workbench.vast.live_instances == {}
 
 
-@pytest.mark.parametrize(("min_cuda", "expected"), [(None, None), (13.0, {"gte": 13.0})], ids=["no-floor", "floor"])
-def test_offer_query_filters_on_the_cuda_floor_of_the_request(
-    min_cuda: float | None, expected: dict[str, float] | None
-) -> None:
-    request = ResourceRequest(
-        kind=PlacementKind.resources, gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0, min_cuda=min_cuda
-    )
+def test_offer_query_filters_on_cuda_13_unless_the_request_sets_another_floor() -> None:
+    request = ResourceRequest(kind=PlacementKind.resources, gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0)
 
-    actual = build_offer_query(request, 40, 10).get("cuda_max_good")
+    actual = [
+        build_offer_query(placement, 40, 10)["cuda_max_good"]
+        for placement in (request, request.model_copy(update={"min_cuda": 13.2}))
+    ]
 
-    assert actual == expected, f"Expected the CUDA filter {expected}, got {actual}."
+    expected = [{"gte": 13.0}, {"gte": 13.2}]
+    assert actual == expected, f"Expected the CUDA filters {expected}, got {actual}."
