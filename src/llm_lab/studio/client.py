@@ -7,7 +7,7 @@ import httpx
 from pydantic import BaseModel, Field, RootModel, SecretStr
 
 from llm_lab.dependencies import Depends
-from llm_lab.settings import StudioSettingsDep
+from llm_lab.settings import SettingsDep
 from llm_lab.studio.recipe import JobRequest
 from llm_lab.studio.ssh import SshSessionDep
 
@@ -32,17 +32,10 @@ class StartedJob(BaseModel):
     job_id: str
 
 
-class Progress(BaseModel):
-    done: int | None
-    total: int | None
-    percent: float | None
-
-
 class RunningJob(BaseModel):
     status: Literal["created", "pending", "active", "cancelling"]
     stage: str | None
     current_column: str | None
-    progress: Progress
 
 
 class CompletedJob(BaseModel):
@@ -131,14 +124,14 @@ class StudioClient:
                     assert_never(job)
 
 
-def open_studio_client(settings: StudioSettingsDep, ssh: SshSessionDep) -> Generator[StudioClient]:
+def open_studio_client(settings: SettingsDep, ssh: SshSessionDep) -> Generator[StudioClient]:
     with httpx.Client(
         transport=httpx.HTTPTransport(uds=str(ssh.studio_socket)),
-        base_url=f"http://127.0.0.1:{settings.port}",
-        auth=StudioLogin(settings.username, settings.password),
-        timeout=settings.request_timeout_seconds,
+        base_url=f"http://127.0.0.1:{settings.studio_port}",
+        auth=StudioLogin(settings.studio_username, settings.studio_password),
+        timeout=settings.studio_request_timeout_seconds,
     ) as http:
-        yield StudioClient(http, settings.poll_seconds)
+        yield StudioClient(http, settings.studio_poll_seconds)
 
 
 type StudioClientDep = Annotated[StudioClient, Depends(open_studio_client)]

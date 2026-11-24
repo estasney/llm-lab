@@ -79,7 +79,12 @@ def build_app(studio: FakeStudio, run_directories: FakeRunDirectories, datasets_
     )
     return app.with_dependency_overrides(
         {
-            get_settings: lambda: Settings(datasets_dir=datasets_dir),
+            get_settings: lambda: Settings(
+                datasets_dir=datasets_dir,
+                studio_ssh_host="studio.test",
+                studio_ssh_port=22,
+                studio_password=SecretStr("password"),
+            ),
             open_studio_client: lambda: StudioClient(http, poll_seconds=0),
             open_ssh_session: lambda: run_directories,
         }

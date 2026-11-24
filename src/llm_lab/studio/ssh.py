@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from typing import Annotated, Protocol, assert_never
 
 from llm_lab.dependencies import Depends
-from llm_lab.settings import StudioSettingsDep
+from llm_lab.settings import SettingsDep
 
 
 class RunDirectorySource(Protocol):
@@ -26,7 +26,7 @@ class SshSession:
                 "rsync",
                 "--archive",
                 "--rsh",
-                shlex.join(["ssh", "-S", str(self.control_socket)]),
+                shlex.join(["ssh", f"-oControlPath={self.control_socket}"]),
                 f"{self.destination}:{remote}/",
                 f"{local}/",
             ],
@@ -34,53 +34,50 @@ class SshSession:
         )
 
 
-def open_ssh_session(settings: StudioSettingsDep) -> Generator[SshSession]:
-    match settings.ssh_identity_file:
-        case None:
-            identity_options = []
-        case Path() as identity_file:
-            identity_options = ["-i", str(identity_file), "-o", "IdentitiesOnly=yes"]
-        case _:
-            assert_never(settings.ssh_identity_file)
-    settings.known_hosts_file.parent.mkdir(parents=True, exist_ok=True)
+def open_ssh_session(settings: SettingsDep) -> Generator[SshSession]:
+    settings.studio_known_hosts_file.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory() as directory:
         session = SshSession(
-            destination=f"{settings.ssh_user}@{settings.ssh_host}",
+            destination=f"{settings.studio_ssh_user}@{settings.studio_ssh_host}",
             control_socket=Path(directory) / "control",
             studio_socket=Path(directory) / "studio",
         )
+        options = {
+            "ControlMaster": "yes",
+            "ControlPath": str(session.control_socket),
+            "ForkAfterAuthentication": "yes",
+            "SessionType": "none",
+            "LocalForward": f"{session.studio_socket} 127.0.0.1:{settings.studio_port}",
+            "ExitOnForwardFailure": "yes",
+            "Port": str(settings.studio_ssh_port),
+            "BatchMode": "yes",
+            "StrictHostKeyChecking": "accept-new",
+            "UserKnownHostsFile": str(settings.studio_known_hosts_file),
+            "LogLevel": "ERROR",
+        }
+        match settings.studio_ssh_identity_file:
+            case None:
+                pass
+            case Path() as identity_file:
+                options |= {"IdentityFile": str(identity_file), "IdentitiesOnly": "yes"}
+            case _:
+                assert_never(settings.studio_ssh_identity_file)
         subprocess.run(
-            [
-                "ssh",
-                "-M",
-                "-S",
-                str(session.control_socket),
-                "-f",
-                "-N",
-                "-L",
-                f"{session.studio_socket}:127.0.0.1:{settings.port}",
-                "-p",
-                str(settings.ssh_port),
-                "-o",
-                "LogLevel=ERROR",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ExitOnForwardFailure=yes",
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                "-o",
-                f"UserKnownHostsFile={settings.known_hosts_file}",
-                *identity_options,
-                session.destination,
-            ],
-            check=True,
+            ["ssh", *(f"-o{name}={value}" for name, value in options.items()), session.destination], check=True
         )
         try:
             yield session
         finally:
             subprocess.run(
-                ["ssh", "-q", "-S", str(session.control_socket), "-O", "exit", session.destination], check=True
+                [
+                    "ssh",
+                    f"-oControlPath={session.control_socket}",
+                    "-oLogLevel=QUIET",
+                    "-O",
+                    "exit",
+                    session.destination,
+                ],
+                check=True,
             )
 
 
