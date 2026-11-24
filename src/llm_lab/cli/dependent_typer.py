@@ -1,19 +1,29 @@
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Mapping
+from copy import copy
 from functools import update_wrapper
+from typing import Self
 
 import typer
 from typer.core import TyperCommand
 
-from llm_lab.dependencies import execute_plan, plan_call
+from llm_lab.dependencies import execute_plan, execute_plan_without_blocking, plan_call
 
 
 class DependentCommand:
-    def __init__(self, function: Callable[..., object]) -> None:
-        self.plan = plan_call(function)
+    function: Callable[..., object]
+
+    def __init__(
+        self, function: Callable[..., object], overrides: Mapping[Callable[..., object], Callable[..., object]]
+    ) -> None:
+        self.function = function
+        self.plan = plan_call(function, overrides)
         self.__signature__ = self.plan.signature
         update_wrapper(self, function)
 
     def __call__(self, **arguments: object) -> object:
+        if self.plan.runs_async:
+            return asyncio.run(execute_plan_without_blocking(self.plan, arguments))
         return execute_plan(self.plan, arguments)
 
 
@@ -50,7 +60,22 @@ class DependentTyper(typer.Typer):
         )
 
         def decorator(function: CommandT) -> CommandT:
-            register(DependentCommand(function))
+            register(DependentCommand(function, {}))
             return function
 
         return decorator
+
+    def with_dependency_overrides(self, overrides: Mapping[Callable[..., object], Callable[..., object]]) -> Self:
+        overridden = copy(self)
+        overridden.registered_commands = [copy(info) for info in self.registered_commands]
+        for info in overridden.registered_commands:
+            if isinstance(info.callback, DependentCommand):
+                info.callback = DependentCommand(info.callback.function, overrides)
+        overridden.registered_groups = [copy(info) for info in self.registered_groups]
+        for info in overridden.registered_groups:
+            match info.typer_instance:
+                case DependentTyper() as group:
+                    info.typer_instance = group.with_dependency_overrides(overrides)
+                case _:
+                    pass
+        return overridden
