@@ -8,6 +8,7 @@ import httpx
 from pydantic import BaseModel, SecretStr
 
 from llm_lab.jobs.protocol import Active, Completed, ExplicitOffer, Halted, JobSpec, ResourceRequest
+from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings
 
 
@@ -66,7 +67,7 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
     }
 
 
-def build_instance_request(spec: JobSpec, secrets: Mapping[str, SecretStr], api_url: str) -> dict[str, object]:
+def build_instance_request(spec: JobSpec, secrets: Mapping[SecretName, SecretStr], api_url: str) -> dict[str, object]:
     script = "\n".join(
         [
             "if [ ! -e /llm-lab-job-done ]; then",
@@ -107,11 +108,11 @@ def classify(actual_status: str | None, exit_code: int | None) -> Active | Compl
 
 
 class VastInstanceProvider:
-    def __init__(
-        self, settings: Settings, api_key: SecretStr, http: httpx.Client, sleep: Callable[[float], None]
-    ) -> None:
+    def __init__(self, settings: Settings, http: httpx.Client, sleep: Callable[[float], None]) -> None:
+        if settings.vast_api_key is None:
+            raise LookupError("the Vast.ai API key is not set, so set it with `llm-lab secrets set VAST_API_KEY`")
         self.settings = settings
-        self.api_key = api_key
+        self.api_key = settings.vast_api_key
         self.http = http
         self.sleep = sleep
 
@@ -129,7 +130,7 @@ class VastInstanceProvider:
             case _:
                 assert_never(spec.placement)
 
-    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[str, SecretStr]) -> int | None:
+    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[SecretName, SecretStr]) -> int | None:
         response = self.call_api(
             "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, secrets, self.settings.vast_api_url)
         )

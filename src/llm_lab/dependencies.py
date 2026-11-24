@@ -51,6 +51,14 @@ def read_depends(function: Callable[..., object], parameter: inspect.Parameter) 
             raise TypeError(f"parameter {parameter.name!r} of {function!r} has more than one Depends annotation")
 
 
+def expand_type_alias(parameter: inspect.Parameter) -> inspect.Parameter:
+    match parameter.annotation:
+        case TypeAliasType() as alias:
+            return parameter.replace(annotation=alias.__value__)
+        case _:
+            return parameter
+
+
 def read_provider_parameters(function: Callable[..., object]) -> dict[str, Depends]:
     parameters = inspect.signature(function, eval_str=True).parameters.values()
     requests = {parameter.name: read_depends(function, parameter) for parameter in parameters}
@@ -95,7 +103,11 @@ def plan_call(
         dependencies,
         tuple(resolved.values()),
         signature.replace(
-            parameters=[parameter for parameter in signature.parameters.values() if requests[parameter.name] is None]
+            parameters=[
+                expand_type_alias(parameter)
+                for parameter in signature.parameters.values()
+                if requests[parameter.name] is None
+            ]
         ),
     )
 

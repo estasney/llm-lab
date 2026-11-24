@@ -1,9 +1,26 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Literal, Self, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
+
+from llm_lab.keyring_settings import SecretName
+
+
+class PlacementKind(StrEnum):
+    resources = "resources"
+    offer = "offer"
+
+
+class JobCondition(StrEnum):
+    pending = "pending"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+    aborted = "aborted"
+
 
 type JobName = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")]
 type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
@@ -12,7 +29,7 @@ type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
 class ResourceRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    kind: Literal["resources"]
+    kind: Literal[PlacementKind.resources]
     gpu_name: Annotated[str, Field(min_length=1)]
     gpu_count: PositiveInt
     max_dollars_per_hour: PositiveFloat
@@ -21,7 +38,7 @@ class ResourceRequest(BaseModel):
 class ExplicitOffer(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    kind: Literal["offer"]
+    kind: Literal[PlacementKind.offer]
     offer_id: int
 
 
@@ -32,7 +49,7 @@ class JobSpec(BaseModel):
     image: Annotated[str, Field(min_length=1)]
     command: Annotated[tuple[str, ...], Field(min_length=1)]
     environment: Mapping[EnvironmentName, str] = Field(default_factory=dict)
-    secret_environment: tuple[EnvironmentName, ...] = ()
+    secret_environment: tuple[SecretName, ...] = ()
     disk_gb: PositiveFloat
     ttl_seconds_after_finished: PositiveInt
     placement: Annotated[ResourceRequest | ExplicitOffer, Field(discriminator="kind")]
@@ -48,14 +65,14 @@ class JobSpec(BaseModel):
 class Pending(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    condition: Literal["pending"] = "pending"
+    condition: Literal[JobCondition.pending] = JobCondition.pending
     submitted_at: datetime
 
 
 class Running(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    condition: Literal["running"] = "running"
+    condition: Literal[JobCondition.running] = JobCondition.running
     submitted_at: datetime
     instance_id: int
 
@@ -63,7 +80,7 @@ class Running(BaseModel):
 class Succeeded(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    condition: Literal["succeeded"] = "succeeded"
+    condition: Literal[JobCondition.succeeded] = JobCondition.succeeded
     submitted_at: datetime
     finished_at: datetime
     instance_id: int
@@ -72,7 +89,7 @@ class Succeeded(BaseModel):
 class Failed(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    condition: Literal["failed"] = "failed"
+    condition: Literal[JobCondition.failed] = JobCondition.failed
     submitted_at: datetime
     finished_at: datetime
     instance_id: int
@@ -82,7 +99,7 @@ class Failed(BaseModel):
 class Aborted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    condition: Literal["aborted"] = "aborted"
+    condition: Literal[JobCondition.aborted] = JobCondition.aborted
     submitted_at: datetime
     finished_at: datetime
     reason: str

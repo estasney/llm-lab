@@ -20,12 +20,13 @@ from llm_lab.jobs.protocol import (
     conclude,
 )
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
+from llm_lab.keyring_settings import SecretName
 
 
 class InstanceProvider(Protocol):
     def find_offers(self, spec: JobSpec) -> Sequence[int]: ...
 
-    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[str, SecretStr]) -> int | None: ...
+    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[SecretName, SecretStr]) -> int | None: ...
 
     def observe(self, instance_id: int) -> Active | Completed | Halted: ...
 
@@ -35,7 +36,7 @@ class InstanceProvider(Protocol):
 
 
 class SecretSource(Protocol):
-    def read(self, name: str) -> SecretStr: ...
+    def read(self, name: SecretName) -> SecretStr: ...
 
 
 class JobOrchestrator:
@@ -143,12 +144,14 @@ class JobOrchestrator:
 
     def record_transition(self, record: JobRecord) -> None:
         self.session.add(
-            JobTransitionRow(name=record.spec.name, condition=record.status.condition, record=record.model_dump_json())
+            JobTransitionRow(
+                name=record.spec.name, condition=record.status.condition.value, record=record.model_dump_json()
+            )
         )
         self.session.commit()
 
     def rent_instance(
-        self, spec: JobSpec, secrets: Mapping[str, SecretStr], pending: Pending, rented: list[int]
+        self, spec: JobSpec, secrets: Mapping[SecretName, SecretStr], pending: Pending, rented: list[int]
     ) -> Running | Aborted:
         for offer_id in self.provider.find_offers(spec):
             instance_id = self.provider.rent_offer(offer_id, spec, secrets)

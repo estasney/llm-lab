@@ -288,6 +288,28 @@ def test_type_alias_with_depends_supplies_its_value() -> None:
     assert actual == "7\n", f"Expected the alias to supply 7, got {actual!r}."
 
 
+type NameArgument = Annotated[str, typer.Argument(help="Name to print.", default_factory=lambda: "from factory")]
+
+
+def test_type_alias_with_a_cli_parameter_keeps_the_typer_configuration() -> None:
+    """
+    Arrange: a command whose parameter is annotated with a type alias that holds a Typer argument.
+    Act: run the command without the argument, and show its help.
+    Assert: the command printed the value of the default factory, and the help shows the help text of the argument.
+    """
+    app = DependentTyper()
+
+    @app.command()
+    def echo_name(name: NameArgument) -> None:
+        typer.echo(name)
+
+    actual = run_cli(app, [])
+    help_text = run_cli(app, ["--help"])
+
+    assert actual == "from factory\n", f"Expected the default factory to supply the name, got {actual!r}."
+    assert "Name to print." in help_text, f"Expected the help text of the argument, got {help_text!r}."
+
+
 def test_command_keeps_its_cli_parameters_and_hides_its_dependencies() -> None:
     """
     Arrange: a command with an argument, an option and a dependency.

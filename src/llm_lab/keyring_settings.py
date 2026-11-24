@@ -1,9 +1,15 @@
 from dataclasses import dataclass
+from enum import StrEnum
 
 import keyring
 from keyring.errors import NoKeyringError
 from pydantic.fields import FieldInfo
 from pydantic_settings import PydanticBaseSettingsSource
+
+
+class SecretName(StrEnum):
+    hf_token = "HF_TOKEN"
+    vast_api_key = "VAST_API_KEY"
 
 
 @dataclass(frozen=True)

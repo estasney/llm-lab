@@ -25,6 +25,7 @@ from llm_lab.jobs.protocol import (
     ExplicitOffer,
     Failed,
     JobSpec,
+    PlacementKind,
     ResourceRequest,
     Running,
     Succeeded,
@@ -32,6 +33,7 @@ from llm_lab.jobs.protocol import (
 from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.jobs.tables import Base, JobTransitionRow
 from llm_lab.jobs.vast import VastInstanceProvider
+from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings, get_settings
 
 
@@ -144,7 +146,6 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
     session = Session(engine)
     provider = VastInstanceProvider(
         settings,
-        SecretStr("secret-key"),
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
@@ -183,11 +184,11 @@ def build_spec(placement: ResourceRequest | ExplicitOffer | None = None) -> JobS
         image="ghcr.io/example/train:1",
         command=("python", "train.py", "--note", "two words"),
         environment={"SEED": "1"},
-        secret_environment=("HF_TOKEN",),
+        secret_environment=(SecretName.hf_token,),
         disk_gb=40,
         ttl_seconds_after_finished=600,
         placement=placement
-        or ResourceRequest(kind="resources", gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0),
+        or ResourceRequest(kind=PlacementKind.resources, gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0),
     )
 
 
@@ -243,18 +244,6 @@ def test_each_database_connection_has_the_sqlite_pragmas(workbench: Workbench) -
 def test_migrations_create_the_schema_of_the_models(workbench: Workbench) -> None:
     with workbench.engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
-
-
-def test_submit_rents_no_instance_and_records_no_job_when_a_secret_is_not_a_settings_field(
-    workbench: Workbench,
-) -> None:
-    spec = build_spec().model_copy(update={"secret_environment": ("HF_TOKEN", "WANDB_API_KEY")})
-
-    with pytest.raises(LookupError, match="WANDB_API_KEY"):
-        workbench.orchestrator.submit(spec)
-
-    assert workbench.vast.requests == []
-    assert read_conditions(workbench.engine, "train") == []
 
 
 def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_code(workbench: Workbench) -> None:
@@ -337,7 +326,7 @@ def test_submit_rents_the_next_offer_when_an_offer_is_not_available(workbench: W
 
 
 def test_submit_with_an_explicit_offer_rents_that_offer_without_a_search(workbench: Workbench) -> None:
-    record = workbench.orchestrator.submit(build_spec(ExplicitOffer(kind="offer", offer_id=77)))
+    record = workbench.orchestrator.submit(build_spec(ExplicitOffer(kind=PlacementKind.offer, offer_id=77)))
 
     assert isinstance(record.status, Running)
     assert workbench.vast.rented_offers == [77]
@@ -456,6 +445,21 @@ def test_cli_rejects_a_vast_command_when_the_api_key_has_no_keyring_entry(workbe
         CliRunner().invoke(overridden, ["jobs", "sync"], catch_exceptions=False)
 
 
+def test_cli_prompts_for_the_job_name_and_the_manifest_when_they_are_omitted(
+    tmp_path: Path, workbench: Workbench
+) -> None:
+    workbench.orchestrator.submit(build_spec())
+
+    history = CliRunner().invoke(app, ["jobs", "history"], input="train\n", catch_exceptions=False)
+    submit = CliRunner().invoke(app, ["jobs", "submit"], input=f"{tmp_path / 'absent.yaml'}\n")
+
+    assert "Job name: " in history.output
+    assert history.output.count('"condition":') == 2
+    assert "Manifest file: " in submit.output
+    assert submit.exit_code == 2
+    assert "does not exist" in submit.output
+
+
 def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
     with pytest.raises(LookupError):
         workbench.orchestrator.sync("absent")
@@ -468,8 +472,8 @@ def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
         {"command": []},
         {"retries": 2},
         {"ttl_seconds_after_finished": 0},
-        {"secret_environment": ["SEED"]},
-        {"secret_environment": ["not a name"]},
+        {"environment": {"HF_TOKEN": "plain"}},
+        {"secret_environment": ["WANDB_API_KEY"]},
         {"placement": {"kind": "resources", "gpu_name": "RTX 4090"}},
     ],
 )
@@ -505,10 +509,14 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
     keyring.delete_password("llm-lab", "HF_TOKEN")
     with pytest.raises(LookupError, match="secrets set HF_TOKEN"):
         invoke("submit", str(manifest))
-    with pytest.raises(LookupError, match="WANDB_API_KEY"):
-        CliRunner().invoke(overridden, ["secrets", "set", "WANDB_API_KEY"], catch_exceptions=False)
+    assert workbench.vast.requests == []
+    assert read_conditions(workbench.engine, "train") == []
+    assert CliRunner().invoke(overridden, ["secrets", "set", "WANDB_API_KEY"]).exit_code == 2
     discard_cached_settings()
-    result = CliRunner().invoke(overridden, ["secrets", "set", "HF_TOKEN"], input="wandb-secret-value\n")
+    result = CliRunner().invoke(
+        overridden, ["secrets", "set"], input="NOT_A_SECRET\nHF_TOKEN\nwandb-secret-value\nwandb-secret-value\n"
+    )
+    assert result.exit_code == 0
     assert "wandb-secret-value" not in result.output
     submit_code, submit_output = invoke("submit", str(manifest))
     assert submit_code == 0

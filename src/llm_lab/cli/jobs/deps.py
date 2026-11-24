@@ -13,8 +13,8 @@ from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import SettingsDep
 
 
-def get_http_client() -> Iterator[httpx.Client]:
-    with httpx.Client(timeout=60) as http:
+def get_http_client(settings: SettingsDep) -> Iterator[httpx.Client]:
+    with httpx.Client(timeout=settings.vast_request_timeout_seconds) as http:
         yield http
 
 
@@ -22,9 +22,7 @@ type HttpClientDep = Annotated[httpx.Client, Depends(get_http_client)]
 
 
 def get_instance_provider(settings: SettingsDep, http: HttpClientDep) -> InstanceProvider:
-    if settings.vast_api_key is None:
-        raise LookupError("the Vast.ai API key is not set, so set it with `llm-lab secrets set VAST_API_KEY`")
-    return VastInstanceProvider(settings, settings.vast_api_key, http, time.sleep)
+    return VastInstanceProvider(settings, http, time.sleep)
 
 
 type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_provider)]
