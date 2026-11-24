@@ -13,7 +13,7 @@ from pydantic import SecretStr, ValidationError
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
-from llm_lab.cli.jobs import get_http_client, get_job_record_store
+from llm_lab.cli.jobs.deps import get_http_client, get_job_record_store
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
