@@ -10,7 +10,6 @@ dependencies = [
     "pydantic-settings>=2.16.3",
     "questionary>=2.1.1",
     "typer>=0.29.2",
-    "typing-extensions>=4.16.0",
 ]
 
 [project.scripts]
@@ -20,10 +19,8 @@ llm-lab = "llm_lab.cli:app"
 dev = [
     "ast-grep-cli>=0.51.2",
     "basedpyright>=1.40.2",
-    "hypothesis>=6.170.15",
     "pytest>=9.1.1,<9.2",
     "pytest-cov>=7.1.0",
-    "pytest-xdist>=3.8.0",
     "ruff>=0.17.6",
 ]
 
@@ -35,7 +32,7 @@ build-backend = "uv_build"
 minversion = "9.1"
 strict = true
 testpaths = ["tests"]
-addopts = ["-ra", "--cov", "--cov-report=term-missing", "--numprocesses=2", "--dist=loadgroup"]
+addopts = ["-ra", "--cov", "--cov-report=term-missing"]
 filterwarnings = ["error"]
 
 [tool.basedpyright]

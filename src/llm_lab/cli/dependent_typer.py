@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Callable, Mapping
 from copy import copy
 from functools import update_wrapper
@@ -7,7 +6,7 @@ from typing import Self
 import typer
 from typer.core import TyperCommand
 
-from llm_lab.dependencies import execute_plan, execute_plan_without_blocking, plan_call
+from llm_lab.dependencies import execute_plan, plan_call
 
 
 class DependentCommand:
@@ -22,8 +21,6 @@ class DependentCommand:
         update_wrapper(self, function)
 
     def __call__(self, **arguments: object) -> object:
-        if self.plan.runs_async:
-            return asyncio.run(execute_plan_without_blocking(self.plan, arguments))
         return execute_plan(self.plan, arguments)
 
 
