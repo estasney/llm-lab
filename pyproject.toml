@@ -18,8 +18,12 @@ llm-lab = "llm_lab.cli:app"
 
 [dependency-groups]
 dev = [
+    "ast-grep-cli>=0.51.2",
     "basedpyright>=1.40.2",
+    "hypothesis>=6.170.15",
     "pytest>=9.1.1,<9.2",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.17.6",
 ]
 
@@ -31,7 +35,7 @@ build-backend = "uv_build"
 minversion = "9.1"
 strict = true
 testpaths = ["tests"]
-addopts = ["-ra"]
+addopts = ["-ra", "--cov", "--cov-report=term-missing", "--numprocesses=2", "--dist=loadgroup"]
 filterwarnings = ["error"]
 
 [tool.basedpyright]
