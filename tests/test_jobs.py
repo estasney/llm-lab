@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -8,12 +7,18 @@ from pathlib import Path
 import httpx
 import keyring
 import pytest
+from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
 from keyring.backend import KeyringBackend
 from pydantic import SecretStr, ValidationError
+from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
-from llm_lab.cli.jobs.deps import get_http_client, get_job_record_store
+from llm_lab.cli.jobs.deps import get_http_client
+from llm_lab.database import Base, build_database_url, build_migration_config
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -26,7 +31,7 @@ from llm_lab.jobs.protocol import (
     Succeeded,
 )
 from llm_lab.jobs.secrets import SettingsSecretSource
-from llm_lab.jobs.store import SqliteJobRecordStore
+from llm_lab.jobs.store import SqlAlchemyJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import Settings, get_settings
 
@@ -119,37 +124,42 @@ class MemoryKeyring(KeyringBackend):
 @dataclass
 class Workbench:
     vast: FakeVast
-    store: SqliteJobRecordStore
+    engine: Engine
+    store: SqlAlchemyJobRecordStore
     provider: VastInstanceProvider
     orchestrator: JobOrchestrator
     sleeps: list[float]
 
 
 @pytest.fixture
-def workbench(tmp_path: Path) -> Iterator[Workbench]:
+def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workbench]:
     vast = FakeVast()
     sleeps: list[float] = []
     previous_keyring = keyring.get_keyring()
     keyring.set_keyring(MemoryKeyring())
     keyring.set_password("llm-lab", "VAST_API_KEY", "secret-key")
     keyring.set_password("llm-lab", "HF_TOKEN", "hf-secret-value")
+    monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "jobs.sqlite3"))
     get_settings.cache_clear()
+    settings = Settings()
+    command.upgrade(build_migration_config(settings), "head")
+    engine = create_engine(build_database_url(settings))
     provider = VastInstanceProvider(
-        Settings(),
+        settings,
         SecretStr("secret-key"),
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
-    connection = sqlite3.connect(tmp_path / "jobs.sqlite3")
-    store = SqliteJobRecordStore(connection)
+    store = SqlAlchemyJobRecordStore(sessionmaker(engine))
     yield Workbench(
         vast,
+        engine,
         store,
         provider,
-        JobOrchestrator(provider, store, SettingsSecretSource(Settings()), SteppingClock().read),
+        JobOrchestrator(provider, store, SettingsSecretSource(settings), SteppingClock().read),
         sleeps,
     )
-    connection.close()
+    engine.dispose()
     keyring.set_keyring(previous_keyring)
 
 
@@ -200,9 +210,15 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
         "env": {"SEED": "1", "HF_TOKEN": "hf-secret-value"},
     }
     assert "hf-secret-value" not in record.model_dump_json()
-    stored = workbench.store.connection.execute("SELECT group_concat(record) FROM job_transitions").fetchone()
-    assert '"secret_environment":["HF_TOKEN"]' in stored[0]
-    assert "hf-secret-value" not in stored[0]
+    with workbench.engine.connect() as connection:
+        stored = "".join(connection.execute(text("SELECT record FROM job_transitions")).scalars())
+    assert '"secret_environment":["HF_TOKEN"]' in stored
+    assert "hf-secret-value" not in stored
+
+
+def test_migrations_create_the_schema_of_the_models(workbench: Workbench) -> None:
+    with workbench.engine.connect() as connection:
+        assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
 
 
 def test_submit_rents_no_instance_and_records_no_job_when_a_secret_is_not_a_settings_field(
@@ -413,7 +429,7 @@ def test_settings_prefer_an_environment_variable_to_a_keyring_entry(
 
 def test_cli_rejects_a_vast_command_when_the_api_key_has_no_keyring_entry(workbench: Workbench) -> None:
     keyring.delete_password("llm-lab", "VAST_API_KEY")
-    overridden = app.with_dependency_overrides({get_job_record_store: lambda: workbench.store})
+    overridden = app
 
     assert CliRunner().invoke(overridden, ["jobs", "list"], catch_exceptions=False).exit_code == 0
     with pytest.raises(LookupError, match="secrets set VAST_API_KEY"):
@@ -458,7 +474,6 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
     )
     overridden = app.with_dependency_overrides(
         {
-            get_job_record_store: lambda: workbench.store,
             get_http_client: lambda: httpx.Client(transport=httpx.MockTransport(workbench.vast.handle)),
         }
     )
