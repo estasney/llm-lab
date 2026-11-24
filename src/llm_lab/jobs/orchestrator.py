@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Protocol, assert_never
 
 from pydantic import SecretStr
+from sqlalchemy import Engine, select
+from sqlalchemy.orm import Session
 
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -17,6 +19,7 @@ from llm_lab.jobs.protocol import (
     Succeeded,
     conclude,
 )
+from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 
 
 class InstanceProvider(Protocol):
@@ -35,29 +38,21 @@ class SecretSource(Protocol):
     def read(self, name: str) -> SecretStr: ...
 
 
-class JobRecordStore(Protocol):
-    def append(self, record: JobRecord) -> None: ...
-
-    def read_latest(self, name: str) -> JobRecord | None: ...
-
-    def list_latest(self) -> Sequence[JobRecord]: ...
-
-
 class JobOrchestrator:
     def __init__(
         self,
         provider: InstanceProvider,
-        store: JobRecordStore,
+        engine: Engine,
         secret_source: SecretSource,
         read_clock: Callable[[], datetime],
     ) -> None:
         self.provider = provider
         self.secret_source = secret_source
-        self.store = store
+        self.engine = engine
         self.read_clock = read_clock
 
     def submit(self, spec: JobSpec) -> JobRecord:
-        previous = self.store.read_latest(spec.name)
+        previous = self.read_latest(spec.name)
         if previous is not None:
             match previous.status:
                 case Pending() | Running():
@@ -68,12 +63,12 @@ class JobOrchestrator:
                     assert_never(previous.status)
         secrets = {name: self.secret_source.read(name) for name in spec.secret_environment}
         pending = Pending(submitted_at=self.read_clock())
-        self.store.append(JobRecord(spec=spec, status=pending))
+        self.record_transition(JobRecord(spec=spec, status=pending))
         rented: list[int] = []
         recorded = False
         try:
             record = JobRecord(spec=spec, status=self.rent_instance(spec, secrets, pending, rented))
-            self.store.append(record)
+            self.record_transition(record)
             recorded = True
         finally:
             if not recorded:
@@ -110,7 +105,9 @@ class JobOrchestrator:
                 assert_never(record.status)
 
     def sync_all(self) -> Sequence[JobRecord]:
-        return [self.sync(record.spec.name) for record in self.store.list_latest()]
+        with Session(self.engine) as session:
+            names = [row.name for row in session.scalars(select_latest_transitions())]
+        return [self.sync(name) for name in names]
 
     def abandon(self, name: str) -> JobRecord:
         record = self.read(name)
@@ -131,10 +128,28 @@ class JobOrchestrator:
         )
 
     def read(self, name: str) -> JobRecord:
-        record = self.store.read_latest(name)
+        record = self.read_latest(name)
         if record is None:
             raise LookupError(f"no job has the name {name!r}")
         return record
+
+    def read_latest(self, name: str) -> JobRecord | None:
+        with Session(self.engine) as session:
+            record = session.scalar(
+                select(JobTransitionRow.record)
+                .where(JobTransitionRow.name == name)
+                .order_by(JobTransitionRow.sequence.desc())
+                .limit(1)
+            )
+        return None if record is None else JobRecord.model_validate_json(record)
+
+    def record_transition(self, record: JobRecord) -> None:
+        with Session(self.engine) as session, session.begin():
+            session.add(
+                JobTransitionRow(
+                    name=record.spec.name, condition=record.status.condition, record=record.model_dump_json()
+                )
+            )
 
     def rent_instance(
         self, spec: JobSpec, secrets: Mapping[str, SecretStr], pending: Pending, rented: list[int]
@@ -151,7 +166,7 @@ class JobOrchestrator:
     def finish(self, spec: JobSpec, known_instances: Sequence[int], status: Succeeded | Failed | Aborted) -> JobRecord:
         self.destroy_instances(spec.name, known_instances)
         record = JobRecord(spec=spec, status=status)
-        self.store.append(record)
+        self.record_transition(record)
         return record
 
     def destroy_instances(self, job_name: str, known_instances: Sequence[int]) -> None:

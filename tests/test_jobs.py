@@ -12,7 +12,8 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from keyring.backend import KeyringBackend
 from pydantic import SecretStr, ValidationError
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
@@ -24,13 +25,12 @@ from llm_lab.jobs.protocol import (
     ExplicitOffer,
     Failed,
     JobSpec,
-    Pending,
     ResourceRequest,
     Running,
     Succeeded,
 )
 from llm_lab.jobs.secrets import SettingsSecretSource
-from llm_lab.jobs.sqlite import Base, SqliteJobRecordStore
+from llm_lab.jobs.tables import Base, JobTransitionRow
 from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import Settings, get_settings
 
@@ -124,7 +124,6 @@ class MemoryKeyring(KeyringBackend):
 class Workbench:
     vast: FakeVast
     engine: Engine
-    store: SqliteJobRecordStore
     provider: VastInstanceProvider
     orchestrator: JobOrchestrator
     sleeps: list[float]
@@ -149,17 +148,26 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
-    store = SqliteJobRecordStore(engine)
     yield Workbench(
         vast,
         engine,
-        store,
         provider,
-        JobOrchestrator(provider, store, SettingsSecretSource(settings), SteppingClock().read),
+        JobOrchestrator(provider, engine, SettingsSecretSource(settings), SteppingClock().read),
         sleeps,
     )
     engine.dispose()
     keyring.set_keyring(previous_keyring)
+
+
+def read_conditions(engine: Engine, name: str) -> list[str]:
+    with Session(engine) as session:
+        return list(
+            session.scalars(
+                select(JobTransitionRow.condition)
+                .where(JobTransitionRow.name == name)
+                .order_by(JobTransitionRow.sequence)
+            )
+        )
 
 
 def build_spec(placement: ResourceRequest | ExplicitOffer | None = None) -> JobSpec:
@@ -180,7 +188,7 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
     record = workbench.orchestrator.submit(build_spec())
 
     assert record.status == Running(submitted_at=datetime(2026, 1, 1, tzinfo=UTC), instance_id=9000)
-    assert workbench.store.read_latest("train") == record
+    assert workbench.orchestrator.read("train") == record
     assert workbench.vast.rented_offers == [11]
     assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
     assert workbench.sleeps == []
@@ -229,7 +237,7 @@ def test_submit_rents_no_instance_and_records_no_job_when_a_secret_is_not_a_sett
         workbench.orchestrator.submit(spec)
 
     assert workbench.vast.requests == []
-    assert workbench.store.read_latest("train") is None
+    assert read_conditions(workbench.engine, "train") == []
 
 
 def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_code(workbench: Workbench) -> None:
@@ -239,7 +247,7 @@ def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_co
     assert workbench.orchestrator.sync("train") == submitted
     assert workbench.orchestrator.sync("train") == submitted
     assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
-    assert len(workbench.store.read_history("train")) == 2
+    assert read_conditions(workbench.engine, "train") == ["pending", "running"]
 
 
 @pytest.mark.parametrize(
@@ -255,13 +263,9 @@ def test_sync_records_the_exit_code_and_destroys_the_instance(
     record = workbench.orchestrator.sync("train")
 
     assert isinstance(record.status, status_type)
-    assert workbench.store.read_latest("train") == record
+    assert workbench.orchestrator.read("train") == record
     assert workbench.vast.live_instances == {}
-    assert [type(transition.record.status) for transition in workbench.store.read_history("train")] == [
-        Pending,
-        Running,
-        status_type,
-    ]
+    assert read_conditions(workbench.engine, "train") == ["pending", "running", record.status.condition]
     assert workbench.orchestrator.sync("train") == record
 
 
@@ -369,7 +373,7 @@ def test_sync_keeps_the_job_running_when_observation_raises_an_error(workbench: 
     with pytest.raises(httpx.HTTPStatusError):
         workbench.orchestrator.sync("train")
 
-    assert workbench.store.read_latest("train") == submitted
+    assert workbench.orchestrator.read("train") == submitted
     assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
 
 
@@ -403,7 +407,7 @@ def test_abandon_destroys_each_instance_of_the_job_and_records_the_job_as_aborte
     record = workbench.orchestrator.abandon("train")
 
     assert isinstance(record.status, Aborted)
-    assert workbench.store.read_latest("train") == record
+    assert workbench.orchestrator.read("train") == record
     assert workbench.vast.live_instances == {503: "llm-lab-job-other"}
     assert workbench.orchestrator.abandon("train") == record
 

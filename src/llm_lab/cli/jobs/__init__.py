@@ -1,12 +1,16 @@
+from datetime import UTC
 from pathlib import Path
 from typing import Annotated, assert_never
 
 import typer
 import yaml
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from llm_lab.cli.dependent_typer import DependentTyper
-from llm_lab.cli.jobs.deps import JobOrchestratorDep, JobRecordStoreDep
+from llm_lab.cli.jobs.deps import DatabaseEngineDep, JobOrchestratorDep
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
+from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 
 app = DependentTyper(name="jobs", no_args_is_help=True)
 
@@ -41,15 +45,21 @@ def sync_jobs(orchestrator: JobOrchestratorDep) -> None:
 
 
 @app.command("list")
-def list_jobs(store: JobRecordStoreDep) -> None:
-    for record in store.list_latest():
-        typer.echo(f"{record.spec.name}\t{record.status.condition}")
+def list_jobs(engine: DatabaseEngineDep) -> None:
+    with Session(engine) as session:
+        for row in session.scalars(select_latest_transitions()):
+            typer.echo(f"{row.name}\t{row.condition}")
 
 
 @app.command("history")
-def show_job_history(name: str, store: JobRecordStoreDep) -> None:
-    for transition in store.read_history(name):
-        typer.echo(f"{transition.recorded_at.isoformat()}\t{transition.record.status.model_dump_json()}")
+def show_job_history(name: str, engine: DatabaseEngineDep) -> None:
+    with Session(engine) as session:
+        rows = session.scalars(
+            select(JobTransitionRow).where(JobTransitionRow.name == name).order_by(JobTransitionRow.sequence)
+        )
+        for row in rows:
+            status = JobRecord.model_validate_json(row.record).status
+            typer.echo(f"{row.recorded_at.replace(tzinfo=UTC).isoformat()}\t{status.model_dump_json()}")
 
 
 @app.command("destroy")

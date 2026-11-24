@@ -10,7 +10,6 @@ from llm_lab.database import build_database_url
 from llm_lab.dependencies import Depends
 from llm_lab.jobs.orchestrator import InstanceProvider, JobOrchestrator
 from llm_lab.jobs.secrets import SettingsSecretSource
-from llm_lab.jobs.sqlite import SqliteJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import SettingsDep
 
@@ -24,13 +23,6 @@ def get_database_engine(settings: SettingsDep) -> Iterator[Engine]:
 
 
 type DatabaseEngineDep = Annotated[Engine, Depends(get_database_engine)]
-
-
-def get_job_record_store(engine: DatabaseEngineDep) -> SqliteJobRecordStore:
-    return SqliteJobRecordStore(engine)
-
-
-type JobRecordStoreDep = Annotated[SqliteJobRecordStore, Depends(get_job_record_store)]
 
 
 def get_http_client() -> Iterator[httpx.Client]:
@@ -51,9 +43,9 @@ type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_prov
 
 
 def get_job_orchestrator(
-    settings: SettingsDep, provider: InstanceProviderDep, store: JobRecordStoreDep
+    settings: SettingsDep, provider: InstanceProviderDep, engine: DatabaseEngineDep
 ) -> JobOrchestrator:
-    return JobOrchestrator(provider, store, SettingsSecretSource(settings), lambda: datetime.now(UTC))
+    return JobOrchestrator(provider, engine, SettingsSecretSource(settings), lambda: datetime.now(UTC))
 
 
 type JobOrchestratorDep = Annotated[JobOrchestrator, Depends(get_job_orchestrator)]
