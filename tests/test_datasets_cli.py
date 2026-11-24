@@ -151,3 +151,10 @@ def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: R
     assert actual == expected, f"Expected {expected}, got {actual}."
     assert (spec.ttl_seconds_after_finished, spec.placement) == (600, recipe.job.placement), "Expected the recipe job."
     assert decoded == recipe.source, "Expected the job to carry the recipe file unchanged."
+
+
+def test_committed_recipe_schema_matches_the_schema_command() -> None:
+    committed = (Path(__file__).parent.parent / "recipes" / "recipe.schema.json").read_text()
+    assert run_cli(app, ["datasets", "schema"]) == committed, (
+        "Expected recipes/recipe.schema.json to match the output of llm-lab datasets schema."
+    )

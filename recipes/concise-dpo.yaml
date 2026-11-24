@@ -1,0 +1,133 @@
+# yaml-language-server: $schema=recipe.schema.json
+job:
+  disk_gb: 80
+  ttl_seconds_after_finished: 600
+  placement:
+    kind: resources
+    gpu_name: RTX 6000Ada
+    gpu_count: 1
+    max_dollars_per_hour: 1.5
+
+vllm_args:
+  - --max-model-len
+  - "16384"
+  - --reasoning-parser
+  - qwen3
+
+data_designer:
+  model_configs:
+    - alias: writer
+      model: Qwen/Qwen3-8B
+      provider: vllm
+      inference_parameters:
+        max_parallel_requests: 32
+        max_tokens: 8192
+
+  columns:
+    - name: prompt_type
+      column_type: sampler
+      sampler_type: category
+      params:
+        values:
+          - factual question
+          - how-to question
+          - code question
+          - debugging request
+          - comparison between two options
+          - request for advice
+          - request for an explanation of a concept
+          - casual conversation
+
+    - name: domain
+      column_type: sampler
+      sampler_type: category
+      params:
+        values:
+          - software engineering
+          - data science
+          - cooking
+          - personal finance
+          - health and fitness
+          - travel
+          - home repair
+          - science
+          - history
+          - writing and grammar
+
+    - name: user_style
+      column_type: sampler
+      sampler_type: category
+      params:
+        values:
+          - one short line with no punctuation
+          - two or three full sentences with some context
+          - a long message with background details
+          - a message that includes a code snippet or error text
+
+    - name: prompt
+      column_type: llm-text
+      model_alias: writer
+      prompt: |
+        Write one message that a user sends to an AI assistant.
+        The message is a {{ prompt_type }} about {{ domain }}.
+        Write it as {{ user_style }}.
+        Write only the message, with no quotes and no label.
+
+    - name: baseline_answer
+      column_type: llm-text
+      model_alias: writer
+      extract_reasoning_content: true
+      drop: true
+      prompt: "{{ prompt }}"
+
+    - name: concise_answer
+      column_type: llm-text
+      model_alias: writer
+      extract_reasoning_content: true
+      drop: true
+      system_prompt: |
+        You give the answer in the first sentence and stop when the point is made.
+        You do not write preambles, restate the question, add summaries or offer more help.
+        You keep every fact, step and caveat that the question needs.
+        You use lists and code blocks only when the content is a list or code.
+      prompt: "{{ prompt }}"
+
+    - name: completeness
+      column_type: llm-judge
+      model_alias: writer
+      prompt: |
+        A user sent this message:
+        <message>
+        {{ prompt }}
+        </message>
+
+        Here is a short answer to evaluate:
+        <short_answer>
+        {{ concise_answer }}
+        </short_answer>
+
+        Here is a longer answer to the same message, for reference only:
+        <long_answer>
+        {{ baseline_answer }}
+        </long_answer>
+
+        Decide if the short answer leaves out information that the user needs.
+        Content of the long answer that the user does not need is not missing information.
+        Do not count preambles, restatements, summaries or offers of more help as missing.
+      scores:
+        - name: completeness
+          description: Whether the short answer contains all the information that the message needs.
+          options:
+            2: The short answer contains all the information that the message needs.
+            1: The short answer leaves out a detail that is useful but not necessary.
+            0: The short answer leaves out information that the message needs, or it is wrong.
+
+    - name: rejected
+      column_type: expression
+      dtype: str
+      expr: "<think>\n{{ baseline_answer__reasoning_content }}\n</think>\n\n{{ baseline_answer }}"
+
+    - name: chosen
+      column_type: expression
+      dtype: str
+      expr: "<think>\n{{ concise_answer__reasoning_content }}\n</think>\n\n{{ concise_answer }}"

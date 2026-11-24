@@ -18,6 +18,8 @@ A recipe has three sections:
 - `vllm_args`: optional arguments that llm-lab adds to `vllm serve`, for example `--tensor-parallel-size` or `--max-model-len`. llm-lab sets the model, the host and the port.
 - `data_designer`: a Data Designer configuration. All of its model configs must name the same model and the same provider. vLLM serves that model, and llm-lab points that provider to vLLM.
 
+`recipes/recipe.schema.json` is the JSON schema of a recipe. To let your IDE validate a recipe, put `# yaml-language-server: $schema=recipe.schema.json` on the first line of the recipe. After you change the recipe model or upgrade Data Designer, run `llm-lab datasets schema > recipes/recipe.schema.json`. A test fails when the file is out of date.
+
 ## Setup
 
 1. Run `llm-lab db upgrade` to create the job database.
