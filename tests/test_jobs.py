@@ -276,7 +276,7 @@ def test_cli_runs_a_manifest_file_and_reports_the_record(
 ) -> None:
     workbench.vast.log_text = log_text
     workbench.vast.actual_statuses = iter(["running"])
-    manifest =tmp_path / "job.yaml"
+    manifest = tmp_path / "job.yaml"
     manifest.write_text(
         "name: train\nimage: ghcr.io/example/train:1\ncommand: [python, train.py]\ndisk_gb: 40\n"
         "placement:\n  kind: resources\n  gpu_name: RTX 4090\n  gpu_count: 1\n  max_dollars_per_hour: 1.0\n"
