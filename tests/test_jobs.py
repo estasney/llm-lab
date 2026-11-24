@@ -145,6 +145,7 @@ def test_job_rents_the_offer_with_the_lowest_price_and_destroys_the_instance_aft
     assert search["gpu_name"] == {"eq": "RTX 4090"}
     assert search["dph_total"] == {"lte": 1.0}
     assert rent == {
+        "client_id": "me",
         "image": "ghcr.io/example/train:1",
         "disk": 40.0,
         "label": "llm-lab-job-train",

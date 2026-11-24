@@ -48,7 +48,8 @@ class InstanceIdentity(BaseModel):
 
 
 class InstancePage(BaseModel):
-    instances: list[InstanceIdentity]
+    instances: list[InstanceIdentity] | None
+    next_token: str | None = None
 
 
 class RequestedLog(BaseModel):
@@ -65,7 +66,11 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
         "num_gpus": {"eq": request.gpu_count},
         "disk_space": {"gte": disk_gb},
         "dph_total": {"lte": request.max_dollars_per_hour},
+        "verified": {"eq": True},
+        "external": {"eq": False},
         "rentable": {"eq": True},
+        "rented": {"eq": False},
+        "allocated_storage": disk_gb,
         "type": "ondemand",
         "order": [["dph_total", "asc"]],
         "limit": limit,
@@ -74,6 +79,7 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
 
 def build_instance_request(spec: JobSpec) -> dict[str, object]:
     return {
+        "client_id": "me",
         "image": spec.image,
         "disk": spec.disk_gb,
         "label": label_job(spec.name),
@@ -140,18 +146,26 @@ class VastInstanceProvider:
                 return classify(view.actual_status, None)
 
     def find_instances(self, job_name: str) -> Sequence[int]:
-        response = self.send_with_retries(
-            "GET",
-            f"{self.settings.api_url}/v1/instances",
-            {500, 502, 503, 504},
-            headers=self.authorize(),
-            params={
-                "select_cols": json.dumps(["id", "label"]),
-                "select_filters": json.dumps({"label": {"eq": label_job(job_name)}}),
-            },
-        )
-        response.raise_for_status()
-        return [instance.id for instance in InstancePage.model_validate_json(response.content).instances]
+        params = {
+            "select_filters": json.dumps({"label": {"eq": label_job(job_name)}}),
+            "order_by": json.dumps([{"col": "id", "dir": "asc"}]),
+            "limit": "25",
+        }
+        found: list[int] = []
+        while True:
+            response = self.send_with_retries(
+                "GET",
+                f"{self.settings.api_url}/v1/instances/",
+                {500, 502, 503, 504},
+                headers=self.authorize(),
+                params=params,
+            )
+            response.raise_for_status()
+            page = InstancePage.model_validate_json(response.content)
+            found.extend(instance.id for instance in page.instances or [])
+            if page.next_token is None:
+                return found
+            params = params | {"after_token": page.next_token}
 
     def destroy(self, instance_id: int) -> None:
         response = self.call_api("DELETE", f"/v0/instances/{instance_id}/", {})
