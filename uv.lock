@@ -42,6 +42,21 @@ wheels = [
 ]
 
 [[package]]
+name = "ast-grep-cli"
+version = "0.51.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/69/7dce459258997e24f0bc33d24b4e3c12dc019c4a90287bb3a824c9ed4458/ast_grep_cli-0.51.3.tar.gz", hash = "sha256:7c65ed276be0f90084637c1ec42e79b25b3ca0e44e895678990652b0da40c277", size = 301527, upload-time = "2026-11-16T04:16:49.406Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/14/7619860b72623b8254a300a5434f77151b021cac8b093e544920a1871da9/ast_grep_cli-0.51.3-py3-none-macosx_10_12_universal2.macosx_10_12_x86_64.macosx_11_0_arm64.whl", hash = "sha256:927f9f3e80935dad08081560dde6e5e33e0c3a3075273dcee3a3abb4232eebcf", size = 17446947, upload-time = "2026-11-16T04:16:31.006Z" },
+    { url = "https://files.pythonhosted.org/packages/de/46/3fea65141c00cd4bd048f4adaed514e381e9c10eb152eae364cdbd1bee8f/ast_grep_cli-0.51.3-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:681c955b4b62d2486d803f59c609b74263445b8d8d723df9a8b1dcf3a3c79744", size = 8753534, upload-time = "2026-11-16T04:16:33.992Z" },
+    { url = "https://files.pythonhosted.org/packages/87/a1/045a6ad3de14e517d1ee13f3ef71543414b12e733c604718717da3e51cba/ast_grep_cli-0.51.3-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:cd68636516f9d131b908016ab6514057fba31401f81022c8df7385fdd308ff89", size = 8571921, upload-time = "2026-11-16T04:16:36.268Z" },
+    { url = "https://files.pythonhosted.org/packages/27/68/3ca6c654dccc5ee792bec196e76fb419ed641cba98f165ff149e457d813b/ast_grep_cli-0.51.3-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:c66a670ec71850bbdd01d5c519f4dad4a1c42194226225a2ee600a9ea6a6bdc7", size = 8924557, upload-time = "2026-11-16T04:16:38.784Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/3f/dba0fe390e01062f3711859cdfd5df32c0b245fd45372f34c3fb210c3eef/ast_grep_cli-0.51.3-py3-none-win32.whl", hash = "sha256:b39b1bd33010e6f840848827f0cd5a036e1f8a333cf4f807aafaf3d0fbf09bbc", size = 16794202, upload-time = "2026-11-16T04:16:41.187Z" },
+    { url = "https://files.pythonhosted.org/packages/68/c7/dab5607ff18b72bf1a4c176e2f70a0cde5da98ad1de1e1de73593498d13c/ast_grep_cli-0.51.3-py3-none-win_amd64.whl", hash = "sha256:073f51f01daebaa74c28b62ef822d94c9a6285274a4084cc36c81656baee6c0a", size = 17915839, upload-time = "2026-11-16T04:16:44.202Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/6b/9b3e01290d9ea021d0df9b2aa018b5bec0ee7cedf7ba49bd3c053705c1cd/ast_grep_cli-0.51.3-py3-none-win_arm64.whl", hash = "sha256:6f9f59a07be81c2f4a4a15666d6731cd493dd9403553bf490ce09d8cf9d1eba7", size = 17148624, upload-time = "2026-11-16T04:16:46.894Z" },
+]
+
+[[package]]
 name = "basedpyright"
 version = "1.40.2"
 source = { registry = "https://pypi.org/simple" }
@@ -223,6 +238,15 @@ wheels = [
 ]
 
 [[package]]
+name = "iniconfig"
+version = "2.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/e1/2069291243c926a2ff1cd706c7f3eeb9b62144bf60f77c9fb9ff2fb26bd3/iniconfig-2.3.1.tar.gz", hash = "sha256:67f4b9c50da0dedf52af349e7749a80a9057a5031199791b906c3bb3ae878960", size = 21209, upload-time = "2026-10-06T22:48:38.076Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl", hash = "sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7", size = 7552, upload-time = "2026-10-06T22:48:36.959Z" },
+]
+
+[[package]]
 name = "llm-lab"
 version = "0.1.0"
 source = { editable = "." }
@@ -236,7 +260,9 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ast-grep-cli" },
     { name = "basedpyright" },
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
@@ -251,7 +277,9 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ast-grep-cli", specifier = ">=0.51.2" },
     { name = "basedpyright", specifier = ">=1.40.2" },
+    { name = "pytest", specifier = ">=9.1.1,<9.2" },
     { name = "ruff", specifier = ">=0.17.6" },
 ]
 
@@ -451,6 +479,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/1a/01d622913e6a65d447eb9a42d1ed71d2a50c4244de24091128aaab023875/pandas-3.1.1-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:daf86c882e376ae2a8a459b2f769258d2b6d75e09f6327440cf6eb8d425c5ceb", size = 12913291, upload-time = "2026-11-04T15:07:54.651Z" },
     { url = "https://files.pythonhosted.org/packages/69/73/76b46776b10c6ff7c2037e3748eeb713df8391a34b7768efa81a08c2a77a/pandas-3.1.1-cp315-cp315t-win_amd64.whl", hash = "sha256:f89fb8e88cc5791995cc076c526eac605adc157b6ac6cc619a33ddd0b8bf5871", size = 11273592, upload-time = "2026-11-04T15:07:57.141Z" },
     { url = "https://files.pythonhosted.org/packages/08/ab/cce173d73200410f06306a89dbbb5f2125bd64f66ca5eff393d53d813288/pandas-3.1.1-cp315-cp315t-win_arm64.whl", hash = "sha256:4e6f9a3036fc6a40c5ba00efe4092a45844212bdb6a63eda4ad5a5a4c8da45eb", size = 10604158, upload-time = "2026-11-04T15:07:59.733Z" },
+]
+
+[[package]]
+name = "pluggy"
+version = "1.7.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/db/7fc19e6f2dc92a966727031389fc2e08b558f0f25eb7403c1119ad4713cd/pluggy-1.7.0.tar.gz", hash = "sha256:d1eaa46ebb595891b860ab086b4d09c8588af65ebd4361b8e8f4bb8920b90ba8", size = 123304, upload-time = "2026-10-15T09:50:58.343Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/9e/2b38731e0fc536806f16490e1a12d7f0dc2a1235aa8cc07bcc75416a7daa/pluggy-1.7.0-py3-none-any.whl", hash = "sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec", size = 27082, upload-time = "2026-10-15T09:50:56.808Z" },
 ]
 
 [[package]]
@@ -661,6 +698,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
+]
+
+[[package]]
+name = "pytest"
+version = "9.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "iniconfig" },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
 ]
 
 [[package]]

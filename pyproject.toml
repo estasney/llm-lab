@@ -17,7 +17,9 @@ llm-lab = "llm_lab.cli:app"
 
 [dependency-groups]
 dev = [
+    "ast-grep-cli>=0.51.2",
     "basedpyright>=1.40.2",
+    "pytest>=9.1.1,<9.2",
     "ruff>=0.17.6",
 ]
 
@@ -25,9 +27,16 @@ dev = [
 requires = ["uv_build>=0.13.9,<0.14.0"]
 build-backend = "uv_build"
 
+[tool.pytest]
+minversion = "9.1"
+strict = true
+testpaths = ["tests"]
+addopts = ["-ra"]
+filterwarnings = ["error"]
+
 [tool.basedpyright]
 pythonVersion = "3.12"
-include = ["src"]
+include = ["src", "tests"]
 typeCheckingMode = "recommended"
 enableTypeIgnoreComments = false
 reportAny = "hint"
