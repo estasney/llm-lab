@@ -1,8 +1,9 @@
-from llm_lab.cli import datasets
+from llm_lab.cli import datasets, jobs
 from llm_lab.cli.dependent_typer import DependentTyper
 
 app = DependentTyper(name="llm-lab", no_args_is_help=True)
 app.add_typer(datasets.app)
+app.add_typer(jobs.app)
 
 
 @app.callback()
