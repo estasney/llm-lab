@@ -83,11 +83,11 @@ def test_command_keeps_its_cli_parameters_and_hides_its_dependencies() -> None:
         typer.echo(f"{name} {value} {loud}")
 
     actual = invoke(app, ["ada", "--loud"])
-    help_text = invoke(app, ["--help"])
+    parameters = {parameter.name for parameter in typer.main.get_command(app).params}
 
     assert actual == "ada 7 True\n", f"Expected the CLI values and the dependency, got {actual!r}."
-    assert "--loud" in help_text, f"Expected the help to show the --loud option, got {help_text!r}."
-    assert "value" not in help_text.lower(), f"Expected the help to hide the dependency, got {help_text!r}."
+    assert {"name", "loud"} <= parameters, f"Expected the CLI parameters name and loud, got {parameters}."
+    assert "value" not in parameters, f"Expected the dependency to be hidden from the CLI, got {parameters}."
 
 
 def test_provider_requested_two_times_in_one_command_runs_one_time() -> None:
