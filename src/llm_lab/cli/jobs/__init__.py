@@ -4,11 +4,13 @@ from typing import Annotated, assert_never
 
 import typer
 import yaml
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from llm_lab.cli.db.deps import DatabaseSessionDep
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs.deps import JobOrchestratorDep
+from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 
@@ -41,6 +43,16 @@ type JobNameArgument = Annotated[
 ]
 
 
+def load_job_spec(manifest: Path) -> JobSpec:
+    try:
+        return JobSpec.model_validate(yaml.safe_load(manifest.read_text()))
+    except yaml.YAMLError as error:
+        raise CommandError(f"{manifest} is not valid YAML: {error}") from error
+    except ValidationError as error:
+        problems = [f"  {'.'.join(str(part) for part in item['loc'])}: {item['msg']}" for item in error.errors()]
+        raise CommandError("\n".join([f"{manifest} is not a valid job manifest:", *problems])) from error
+
+
 def report(record: JobRecord) -> None:
     typer.echo(record.model_dump_json(indent=2))
     match record.status:
@@ -54,7 +66,7 @@ def report(record: JobRecord) -> None:
 
 @app.command("submit", help="Start a job.")
 def submit_job(manifest: ManifestArgument, orchestrator: JobOrchestratorDep) -> None:
-    report(orchestrator.submit(JobSpec.model_validate(yaml.safe_load(manifest.read_text()))))
+    report(orchestrator.submit(load_job_spec(manifest)))
 
 
 @app.command("status", help="Refresh and show a job.")

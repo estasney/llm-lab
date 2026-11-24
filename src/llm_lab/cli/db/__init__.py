@@ -2,11 +2,9 @@ from typing import Annotated
 
 import typer
 from alembic import command
-from alembic.migration import MigrationContext
-from sqlalchemy import Engine
 
 from llm_lab.cli.dependent_typer import DependentTyper
-from llm_lab.database import build_migration_config
+from llm_lab.database import build_migration_config, read_revision
 from llm_lab.settings import SettingsDep
 
 app = DependentTyper(name="db", no_args_is_help=True, help="Manage the job database.")
@@ -14,11 +12,6 @@ app = DependentTyper(name="db", no_args_is_help=True, help="Manage the job datab
 
 def prompt_for_revision_message() -> str:
     return typer.prompt("Revision message", type=str)
-
-
-def read_revision(engine: Engine) -> str | None:
-    with engine.connect() as connection:
-        return MigrationContext.configure(connection).get_current_revision()
 
 
 @app.command("upgrade", help="Apply migrations.")

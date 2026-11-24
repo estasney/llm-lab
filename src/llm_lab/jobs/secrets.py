@@ -1,5 +1,6 @@
 from pydantic import SecretStr
 
+from llm_lab.errors import CommandError
 from llm_lab.keyring_settings import KeyringEntry, SecretName, read_keyring_entry
 from llm_lab.settings import Settings
 
@@ -20,6 +21,6 @@ class SettingsSecretSource:
             case SecretStr() as secret:
                 return secret
             case None:
-                raise LookupError(f"the secret {name} is not set, so set it with `llm-lab secrets set {name}`")
+                raise CommandError(f"The secret {name} is not set. Run `llm-lab secrets set {name}`.")
             case value:
                 raise TypeError(f"the Settings field {name.name!r} has the type {type(value).__name__}")

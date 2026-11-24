@@ -6,6 +6,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import (
     Aborted,
     Active,
@@ -57,7 +58,7 @@ class JobOrchestrator:
         if previous is not None:
             match previous.status:
                 case Pending() | Running():
-                    raise ValueError(f"job {spec.name!r} is not finished, so it cannot be submitted again")
+                    raise CommandError(f"Job {spec.name} is not finished. Run `llm-lab jobs status {spec.name}`.")
                 case Succeeded() | Failed() | Aborted():
                     pass
                 case _:
@@ -130,7 +131,7 @@ class JobOrchestrator:
     def read(self, name: str) -> JobRecord:
         record = self.read_latest(name)
         if record is None:
-            raise LookupError(f"no job has the name {name!r}")
+            raise CommandError(f"No job has the name {name}.")
         return record
 
     def read_latest(self, name: str) -> JobRecord | None:

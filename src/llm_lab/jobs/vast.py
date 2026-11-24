@@ -7,6 +7,7 @@ from typing import assert_never
 import httpx
 from pydantic import BaseModel, SecretStr
 
+from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import Active, Completed, ExplicitOffer, Halted, JobSpec, ResourceRequest
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings
@@ -110,7 +111,7 @@ def classify(actual_status: str | None, exit_code: int | None) -> Active | Compl
 class VastInstanceProvider:
     def __init__(self, settings: Settings, http: httpx.Client, sleep: Callable[[float], None]) -> None:
         if settings.vast_api_key is None:
-            raise LookupError("the Vast.ai API key is not set, so set it with `llm-lab secrets set VAST_API_KEY`")
+            raise CommandError("The Vast.ai API key is not set. Run `llm-lab secrets set VAST_API_KEY`.")
         self.settings = settings
         self.api_key = settings.vast_api_key
         self.http = http
@@ -124,7 +125,7 @@ class VastInstanceProvider:
                 response = self.call_api(
                     "POST", "/v0/bundles/", build_offer_query(request, spec.disk_gb, self.settings.vast_offer_limit)
                 )
-                response.raise_for_status()
+                self.require_success(response)
                 offers = OfferPage.model_validate_json(response.content).offers
                 return [offer.id for offer in sorted(offers, key=lambda offer: offer.dph_total)]
             case _:
@@ -136,14 +137,14 @@ class VastInstanceProvider:
         )
         if response.status_code in {404, 410}:
             return None
-        response.raise_for_status()
+        self.require_success(response)
         return CreatedInstance.model_validate_json(response.content).new_contract
 
     def observe(self, instance_id: int) -> Active | Completed | Halted:
         response = self.call_api("GET", f"/v0/instances/{instance_id}/", None)
         if response.status_code == 404:
             return Halted("missing")
-        response.raise_for_status()
+        self.require_success(response)
         view = InstanceEnvelope.model_validate_json(response.content).instances
         if view is None:
             return Halted("missing")
@@ -156,7 +157,7 @@ class VastInstanceProvider:
                 )
                 if actual_status == "exited" and requested.is_client_error:
                     return Halted(actual_status)
-                requested.raise_for_status()
+                self.require_success(requested)
                 return classify(actual_status, self.download_reported_exit_code(requested))
             case _:
                 return classify(view.actual_status, None)
@@ -176,7 +177,7 @@ class VastInstanceProvider:
                 headers=self.authorize(),
                 params=params,
             )
-            response.raise_for_status()
+            self.require_success(response)
             page = InstancePage.model_validate_json(response.content)
             found.extend(instance.id for instance in page.instances or [])
             if page.next_token is None:
@@ -191,7 +192,7 @@ class VastInstanceProvider:
             case Halted(instance_state="missing"):
                 return
             case _:
-                response.raise_for_status()
+                self.require_success(response)
 
     def download_reported_exit_code(self, requested: httpx.Response) -> int | None:
         log = self.send_with_retries(
@@ -199,7 +200,7 @@ class VastInstanceProvider:
         )
         if log.status_code in {403, 404}:
             return None
-        log.raise_for_status()
+        self.require_success(log)
         return read_exit_code(log.text)
 
     def authorize(self) -> dict[str, str]:
@@ -220,10 +221,25 @@ class VastInstanceProvider:
         params: dict[str, str] | None = None,
         json: object = None,
     ) -> httpx.Response:
-        response = self.http.request(method, url, headers=headers, params=params, json=json)
+        response = self.send(method, url, headers, params, json)
         for attempt in range(1, self.settings.vast_request_attempts):
             if response.status_code != 429 and response.status_code not in retried_statuses:
                 break
             self.sleep(self.settings.vast_retry_delay_seconds * attempt)
-            response = self.http.request(method, url, headers=headers, params=params, json=json)
+            response = self.send(method, url, headers, params, json)
         return response
+
+    def send(
+        self, method: str, url: str, headers: dict[str, str] | None, params: dict[str, str] | None, json: object
+    ) -> httpx.Response:
+        try:
+            return self.http.request(method, url, headers=headers, params=params, json=json)
+        except httpx.TransportError as error:
+            raise CommandError(f"The request to {httpx.URL(url).host} did not complete: {error}") from error
+
+    def require_success(self, response: httpx.Response) -> None:
+        if not response.is_success:
+            request = response.request
+            raise CommandError(
+                f"{request.url.host} returned status {response.status_code} for {request.method} {request.url.path}."
+            )

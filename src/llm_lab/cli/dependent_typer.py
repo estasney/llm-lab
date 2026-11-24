@@ -7,6 +7,7 @@ import typer
 from typer.core import TyperCommand
 
 from llm_lab.dependencies import execute_plan, plan_call
+from llm_lab.errors import CommandError
 
 
 class DependentCommand:
@@ -21,7 +22,11 @@ class DependentCommand:
         update_wrapper(self, function)
 
     def __call__(self, **arguments: object) -> object:
-        return execute_plan(self.plan, arguments)
+        try:
+            return execute_plan(self.plan, arguments)
+        except CommandError as error:
+            typer.echo(f"Error: {error}", err=True)
+            raise typer.Exit(1) from error
 
 
 class DependentTyper(typer.Typer):

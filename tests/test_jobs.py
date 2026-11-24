@@ -19,6 +19,7 @@ from typer.testing import CliRunner
 from llm_lab.cli import app
 from llm_lab.cli.jobs.deps import get_http_client
 from llm_lab.database import build_migration_config
+from llm_lab.errors import CommandError
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -241,6 +242,25 @@ def test_each_database_connection_has_the_sqlite_pragmas(workbench: Workbench) -
             assert pragmas == {"foreign_keys": 1, "journal_mode": "wal", "synchronous": 1, "busy_timeout": 5000}
 
 
+def test_cli_reports_expected_errors_as_one_message(
+    tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "job.yaml"
+    manifest.write_text("name: Not/A/Name\nimage: busybox\n")
+    invalid_manifest = CliRunner().invoke(app, ["jobs", "submit", str(manifest)], catch_exceptions=False)
+    monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "new.sqlite3"))
+    discard_cached_settings()
+    old_schema = CliRunner().invoke(app, ["jobs", "list"], catch_exceptions=False)
+
+    assert invalid_manifest.exit_code == 1
+    assert invalid_manifest.output.startswith(f"Error: {manifest} is not a valid job manifest:\n  name: ")
+    assert "  command: Field required\n" in invalid_manifest.output
+    assert (old_schema.exit_code, old_schema.output) == (
+        1,
+        "Error: The job database is not current. Run `llm-lab db upgrade`.\n",
+    )
+
+
 def test_cli_upgrade_reports_whether_it_applied_a_migration(
     tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -361,7 +381,7 @@ def test_submit_rejects_a_job_name_that_is_not_finished_and_accepts_it_after_the
     workbench.vast.actual_statuses = iter(["running"])
     workbench.orchestrator.submit(build_spec())
 
-    with pytest.raises(ValueError, match="not finished"):
+    with pytest.raises(CommandError, match="not finished"):
         workbench.orchestrator.submit(build_spec())
 
     workbench.orchestrator.sync("train")
@@ -376,7 +396,7 @@ def raise_read_timeout() -> httpx.Response:
 def test_instance_is_destroyed_when_the_response_of_the_rent_request_is_lost(workbench: Workbench) -> None:
     workbench.vast.fail_before[("PUT", "asks")] = raise_read_timeout
 
-    with pytest.raises(httpx.ReadTimeout):
+    with pytest.raises(CommandError, match="did not complete"):
         workbench.orchestrator.submit(build_spec())
 
     assert workbench.vast.rented_offers == [11]
@@ -389,7 +409,7 @@ def test_sync_keeps_the_job_running_when_observation_raises_an_error(workbench: 
     submitted = workbench.orchestrator.submit(build_spec())
     workbench.vast.fail_before[("GET", "instances")] = lambda: httpx.Response(500)
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(CommandError, match="status 500"):
         workbench.orchestrator.sync("train")
 
     assert workbench.orchestrator.read("train") == submitted
@@ -454,8 +474,9 @@ def test_cli_rejects_a_vast_command_when_the_api_key_has_no_keyring_entry(workbe
     overridden = app
 
     assert CliRunner().invoke(overridden, ["jobs", "list"], catch_exceptions=False).exit_code == 0
-    with pytest.raises(LookupError, match="secrets set VAST_API_KEY"):
-        CliRunner().invoke(overridden, ["jobs", "sync"], catch_exceptions=False)
+    sync = CliRunner().invoke(overridden, ["jobs", "sync"], catch_exceptions=False)
+    assert sync.exit_code == 1
+    assert sync.output == "Error: The Vast.ai API key is not set. Run `llm-lab secrets set VAST_API_KEY`.\n"
 
 
 def test_cli_prompts_for_the_job_name_and_the_manifest_when_they_are_omitted(
@@ -474,7 +495,7 @@ def test_cli_prompts_for_the_job_name_and_the_manifest_when_they_are_omitted(
 
 
 def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
-    with pytest.raises(LookupError):
+    with pytest.raises(CommandError, match="absent"):
         workbench.orchestrator.sync("absent")
 
 
@@ -520,8 +541,10 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
         return result.exit_code, result.output
 
     keyring.delete_password("llm-lab", "HF_TOKEN")
-    with pytest.raises(LookupError, match="secrets set HF_TOKEN"):
-        invoke("submit", str(manifest))
+    assert invoke("submit", str(manifest)) == (
+        1,
+        "Error: The secret HF_TOKEN is not set. Run `llm-lab secrets set HF_TOKEN`.\n",
+    )
     assert workbench.vast.requests == []
     assert read_conditions(workbench.engine, "train") == []
     assert CliRunner().invoke(overridden, ["secrets", "set", "WANDB_API_KEY"]).exit_code == 2
