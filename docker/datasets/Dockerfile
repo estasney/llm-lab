@@ -5,12 +5,11 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc809
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_NO_DEV=1 \
-    UV_PYTHON_DOWNLOADS=0 \
-    UV_TOOL_DIR=/opt/uv-tools \
-    UV_TOOL_BIN_DIR=/opt/uv-tools/bin
+    UV_PYTHON_DOWNLOADS=0
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv tool install vllm==0.33.0
+    uv venv /opt/vllm \
+ && uv pip install --python /opt/vllm vllm==0.33.0
 
 WORKDIR /opt/llm-lab
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -29,11 +28,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends curl gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /opt/uv-tools /opt/uv-tools
+COPY --from=builder /opt/vllm /opt/vllm
 COPY --from=builder /opt/llm-lab/.venv /opt/llm-lab/.venv
 COPY --chmod=755 docker/datasets/dataset-job.sh /usr/local/bin/llm-lab-dataset-job
 
-ENV PATH=/opt/llm-lab/.venv/bin:/opt/uv-tools/bin:$PATH \
+ENV PATH=/opt/llm-lab/.venv/bin:/opt/vllm/bin:$PATH \
     PYTHONUNBUFFERED=1
 
 WORKDIR /workspace
