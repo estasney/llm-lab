@@ -2,24 +2,36 @@ import json
 import re
 import shlex
 from collections.abc import Callable, Mapping, Sequence
-from typing import assert_never
+from typing import Annotated, assert_never
 
 import httpx
 from pydantic import BaseModel, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from llm_lab.jobs.protocol import Active, Completed, ExplicitOffer, Halted, JobSpec, ResourceRequest
+from llm_lab.keyring_settings import KeyringEntry, KeyringSettingsSource
 
 
 class VastSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VAST_")
 
-    api_key: SecretStr
+    api_key: Annotated[SecretStr, KeyringEntry(service="llm-lab", username="VAST_API_KEY")]
     api_url: str = "https://console.vast.ai/api"
     request_attempts: int = 5
     retry_delay_seconds: float = 2
     offer_limit: int = 10
     log_tail_lines: int = 200
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return init_settings, env_settings, KeyringSettingsSource(settings_cls)
 
 
 class Offer(BaseModel):

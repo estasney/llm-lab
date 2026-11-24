@@ -39,8 +39,15 @@ def get_http_client() -> Iterator[httpx.Client]:
 type HttpClientDep = Annotated[httpx.Client, Depends(get_http_client)]
 
 
-def get_instance_provider(secret_source: SecretSourceDep, http: HttpClientDep) -> InstanceProvider:
-    return VastInstanceProvider(VastSettings(api_key=secret_source.read("VAST_API_KEY")), http, time.sleep)
+def get_vast_settings() -> VastSettings:
+    return VastSettings.model_validate({})
+
+
+type VastSettingsDep = Annotated[VastSettings, Depends(get_vast_settings)]
+
+
+def get_instance_provider(vast_settings: VastSettingsDep, http: HttpClientDep) -> InstanceProvider:
+    return VastInstanceProvider(vast_settings, http, time.sleep)
 
 
 type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_provider)]
