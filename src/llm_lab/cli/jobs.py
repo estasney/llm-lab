@@ -1,4 +1,3 @@
-import os
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -10,9 +9,9 @@ from typing import Annotated, assert_never
 import httpx
 import typer
 import yaml
-from pydantic import SecretStr
 
 from llm_lab.cli.dependent_typer import DependentTyper
+from llm_lab.cli.secrets import SecretSourceDep
 from llm_lab.dependencies import Depends
 from llm_lab.jobs.orchestrator import InstanceProvider, JobOrchestrator
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
@@ -32,16 +31,25 @@ def get_job_record_store(settings: SettingsDep) -> Iterator[SqliteJobRecordStore
 type JobRecordStoreDep = Annotated[SqliteJobRecordStore, Depends(get_job_record_store)]
 
 
-def get_instance_provider() -> Iterator[InstanceProvider]:
+def get_http_client() -> Iterator[httpx.Client]:
     with httpx.Client(timeout=60) as http:
-        yield VastInstanceProvider(VastSettings(api_key=SecretStr(os.environ["VAST_API_KEY"])), http, time.sleep)
+        yield http
+
+
+type HttpClientDep = Annotated[httpx.Client, Depends(get_http_client)]
+
+
+def get_instance_provider(secret_source: SecretSourceDep, http: HttpClientDep) -> InstanceProvider:
+    return VastInstanceProvider(VastSettings(api_key=secret_source.read("VAST_API_KEY")), http, time.sleep)
 
 
 type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_provider)]
 
 
-def get_job_orchestrator(provider: InstanceProviderDep, store: JobRecordStoreDep) -> JobOrchestrator:
-    return JobOrchestrator(provider, store, lambda: datetime.now(UTC))
+def get_job_orchestrator(
+    provider: InstanceProviderDep, store: JobRecordStoreDep, secret_source: SecretSourceDep
+) -> JobOrchestrator:
+    return JobOrchestrator(provider, store, secret_source, lambda: datetime.now(UTC))
 
 
 type JobOrchestratorDep = Annotated[JobOrchestrator, Depends(get_job_orchestrator)]

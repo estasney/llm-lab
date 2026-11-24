@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_LAB_")
 
     job_database_path: Path = Path(".llm-lab/jobs.sqlite3")
+    keyring_service_name: str = "llm-lab"
 
 
 @cache

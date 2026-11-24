@@ -1,11 +1,12 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal, assert_never
+from typing import Annotated, Literal, Self, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
 
 type JobName = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")]
+type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 
 class ResourceRequest(BaseModel):
@@ -30,10 +31,18 @@ class JobSpec(BaseModel):
     name: JobName
     image: Annotated[str, Field(min_length=1)]
     command: Annotated[tuple[str, ...], Field(min_length=1)]
-    environment: Mapping[str, str] = Field(default_factory=dict)
+    environment: Mapping[EnvironmentName, str] = Field(default_factory=dict)
+    secret_environment: tuple[EnvironmentName, ...] = ()
     disk_gb: PositiveFloat
     ttl_seconds_after_finished: PositiveInt
     placement: Annotated[ResourceRequest | ExplicitOffer, Field(discriminator="kind")]
+
+    @model_validator(mode="after")
+    def reject_names_in_both_environments(self) -> Self:
+        repeated = sorted(set(self.environment) & set(self.secret_environment))
+        if repeated:
+            raise ValueError(f"names {repeated!r} are in environment and in secret_environment")
+        return self
 
 
 class Pending(BaseModel):

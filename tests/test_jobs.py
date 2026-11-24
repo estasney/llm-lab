@@ -7,11 +7,13 @@ from pathlib import Path
 
 import httpx
 import pytest
+from keyring.backend import KeyringBackend
 from pydantic import SecretStr, ValidationError
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
-from llm_lab.cli.jobs import get_instance_provider, get_job_record_store
+from llm_lab.cli.jobs import get_http_client, get_job_record_store
+from llm_lab.cli.secrets import get_secret_source
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -23,6 +25,7 @@ from llm_lab.jobs.protocol import (
     Running,
     Succeeded,
 )
+from llm_lab.jobs.secrets import KeyringSecretSource
 from llm_lab.jobs.store import SqliteJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider, VastSettings
 
@@ -97,9 +100,25 @@ class SteppingClock:
         return current
 
 
+class MemoryKeyring(KeyringBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.passwords: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.passwords.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.passwords[service, username] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        del self.passwords[service, username]
+
+
 @dataclass
 class Workbench:
     vast: FakeVast
+    secret_source: KeyringSecretSource
     store: SqliteJobRecordStore
     provider: VastInstanceProvider
     orchestrator: JobOrchestrator
@@ -110,14 +129,24 @@ class Workbench:
 def workbench(tmp_path: Path) -> Iterator[Workbench]:
     vast = FakeVast()
     sleeps: list[float] = []
+    secret_source = KeyringSecretSource(MemoryKeyring(), "llm-lab-test")
+    secret_source.write("VAST_API_KEY", SecretStr("secret-key"))
+    secret_source.write("HF_TOKEN", SecretStr("hf-secret-value"))
     provider = VastInstanceProvider(
-        VastSettings(api_key=SecretStr("secret-key")),
+        VastSettings(api_key=secret_source.read("VAST_API_KEY")),
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
     connection = sqlite3.connect(tmp_path / "jobs.sqlite3")
     store = SqliteJobRecordStore(connection)
-    yield Workbench(vast, store, provider, JobOrchestrator(provider, store, SteppingClock().read), sleeps)
+    yield Workbench(
+        vast,
+        secret_source,
+        store,
+        provider,
+        JobOrchestrator(provider, store, secret_source, SteppingClock().read),
+        sleeps,
+    )
     connection.close()
 
 
@@ -127,6 +156,7 @@ def build_spec(placement: ResourceRequest | ExplicitOffer | None = None) -> JobS
         image="ghcr.io/example/train:1",
         command=("python", "train.py", "--note", "two words"),
         environment={"SEED": "1"},
+        secret_environment=("HF_TOKEN",),
         disk_gb=40,
         ttl_seconds_after_finished=600,
         placement=placement
@@ -164,8 +194,22 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
             'curl -fsS -X DELETE -H "Authorization: Bearer $CONTAINER_API_KEY" '
             '"https://console.vast.ai/api/v0/instances/$CONTAINER_ID/"',
         ],
-        "env": {"SEED": "1"},
+        "env": {"SEED": "1", "HF_TOKEN": "hf-secret-value"},
     }
+    assert "hf-secret-value" not in record.model_dump_json()
+    stored = workbench.store.connection.execute("SELECT group_concat(record) FROM job_transitions").fetchone()
+    assert '"secret_environment":["HF_TOKEN"]' in stored[0]
+    assert "hf-secret-value" not in stored[0]
+
+
+def test_submit_rents_no_instance_and_records_no_job_when_a_secret_is_not_in_the_keyring(workbench: Workbench) -> None:
+    spec = build_spec().model_copy(update={"secret_environment": ("HF_TOKEN", "WANDB_API_KEY")})
+
+    with pytest.raises(LookupError, match="WANDB_API_KEY"):
+        workbench.orchestrator.submit(spec)
+
+    assert workbench.vast.requests == []
+    assert workbench.store.read_latest("train") is None
 
 
 def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_code(workbench: Workbench) -> None:
@@ -356,6 +400,8 @@ def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
         {"command": []},
         {"retries": 2},
         {"ttl_seconds_after_finished": 0},
+        {"secret_environment": ["SEED"]},
+        {"secret_environment": ["not a name"]},
         {"placement": {"kind": "resources", "gpu_name": "RTX 4090"}},
     ],
 )
@@ -375,18 +421,27 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
     manifest = tmp_path / "job.yaml"
     manifest.write_text(
         "name: train\nimage: ghcr.io/example/train:1\ncommand: [python, train.py]\ndisk_gb: 40\n"
-        "ttl_seconds_after_finished: 600\n"
+        "ttl_seconds_after_finished: 600\nsecret_environment: [WANDB_API_KEY]\n"
         "placement:\n  kind: resources\n  gpu_name: RTX 4090\n  gpu_count: 1\n  max_dollars_per_hour: 1.0\n"
     )
     overridden = app.with_dependency_overrides(
-        {get_job_record_store: lambda: workbench.store, get_instance_provider: lambda: workbench.provider}
+        {
+            get_job_record_store: lambda: workbench.store,
+            get_secret_source: lambda: workbench.secret_source,
+            get_http_client: lambda: httpx.Client(transport=httpx.MockTransport(workbench.vast.handle)),
+        }
     )
 
     def invoke(*arguments: str) -> tuple[int, str]:
         result = CliRunner().invoke(overridden, ["jobs", *arguments], catch_exceptions=False)
         return result.exit_code, result.output
 
-    assert invoke("submit", str(manifest))[0] == 0
+    result = CliRunner().invoke(overridden, ["secrets", "set", "WANDB_API_KEY"], input="wandb-secret-value\n")
+    assert "wandb-secret-value" not in result.output
+    submit_code, submit_output = invoke("submit", str(manifest))
+    assert submit_code == 0
+    assert "wandb-secret-value" not in submit_output
+    assert json.loads(workbench.vast.requests[-1].content)["env"] == {"WANDB_API_KEY": "wandb-secret-value"}
     assert invoke("list") == (0, "train\trunning\n")
     status_code, status_output = invoke("status", "train")
     condition = "succeeded" if status_exit_code == 0 else "failed"

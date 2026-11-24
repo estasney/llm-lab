@@ -1,6 +1,8 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Protocol, assert_never
+
+from pydantic import SecretStr
 
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -20,13 +22,17 @@ from llm_lab.jobs.protocol import (
 class InstanceProvider(Protocol):
     def find_offers(self, spec: JobSpec) -> Sequence[int]: ...
 
-    def rent_offer(self, offer_id: int, spec: JobSpec) -> int | None: ...
+    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[str, SecretStr]) -> int | None: ...
 
     def observe(self, instance_id: int) -> Active | Completed | Halted: ...
 
     def find_instances(self, job_name: str) -> Sequence[int]: ...
 
     def destroy(self, instance_id: int) -> None: ...
+
+
+class SecretSource(Protocol):
+    def read(self, name: str) -> SecretStr: ...
 
 
 class JobRecordStore(Protocol):
@@ -38,8 +44,15 @@ class JobRecordStore(Protocol):
 
 
 class JobOrchestrator:
-    def __init__(self, provider: InstanceProvider, store: JobRecordStore, read_clock: Callable[[], datetime]) -> None:
+    def __init__(
+        self,
+        provider: InstanceProvider,
+        store: JobRecordStore,
+        secret_source: SecretSource,
+        read_clock: Callable[[], datetime],
+    ) -> None:
         self.provider = provider
+        self.secret_source = secret_source
         self.store = store
         self.read_clock = read_clock
 
@@ -53,12 +66,13 @@ class JobOrchestrator:
                     pass
                 case _:
                     assert_never(previous.status)
+        secrets = {name: self.secret_source.read(name) for name in spec.secret_environment}
         pending = Pending(submitted_at=self.read_clock())
         self.store.append(JobRecord(spec=spec, status=pending))
         rented: list[int] = []
         recorded = False
         try:
-            record = JobRecord(spec=spec, status=self.rent_instance(spec, pending, rented))
+            record = JobRecord(spec=spec, status=self.rent_instance(spec, secrets, pending, rented))
             self.store.append(record)
             recorded = True
         finally:
@@ -122,9 +136,11 @@ class JobOrchestrator:
             raise LookupError(f"no job has the name {name!r}")
         return record
 
-    def rent_instance(self, spec: JobSpec, pending: Pending, rented: list[int]) -> Running | Aborted:
+    def rent_instance(
+        self, spec: JobSpec, secrets: Mapping[str, SecretStr], pending: Pending, rented: list[int]
+    ) -> Running | Aborted:
         for offer_id in self.provider.find_offers(spec):
-            instance_id = self.provider.rent_offer(offer_id, spec)
+            instance_id = self.provider.rent_offer(offer_id, spec, secrets)
             if instance_id is not None:
                 rented.append(instance_id)
                 return Running(submitted_at=pending.submitted_at, instance_id=instance_id)

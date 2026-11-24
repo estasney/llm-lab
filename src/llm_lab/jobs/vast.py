@@ -1,7 +1,7 @@
 import json
 import re
 import shlex
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import assert_never
 
 import httpx
@@ -77,7 +77,7 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
     }
 
 
-def build_instance_request(spec: JobSpec, api_url: str) -> dict[str, object]:
+def build_instance_request(spec: JobSpec, secrets: Mapping[str, SecretStr], api_url: str) -> dict[str, object]:
     script = "\n".join(
         [
             "if [ ! -e /llm-lab-job-done ]; then",
@@ -98,7 +98,7 @@ def build_instance_request(spec: JobSpec, api_url: str) -> dict[str, object]:
         "label": label_job(spec.name),
         "runtype": "args",
         "args": ["sh", "-c", script],
-        "env": dict(spec.environment),
+        "env": {**spec.environment, **{name: secret.get_secret_value() for name, secret in secrets.items()}},
     }
 
 
@@ -137,8 +137,10 @@ class VastInstanceProvider:
             case _:
                 assert_never(spec.placement)
 
-    def rent_offer(self, offer_id: int, spec: JobSpec) -> int | None:
-        response = self.call_api("PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, self.settings.api_url))
+    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[str, SecretStr]) -> int | None:
+        response = self.call_api(
+            "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, secrets, self.settings.api_url)
+        )
         if response.status_code in {404, 410}:
             return None
         response.raise_for_status()
