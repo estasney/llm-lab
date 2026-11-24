@@ -16,6 +16,8 @@ jobs:
     if: ${{ github.ref_type == 'tag' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/llm-lab-datasets
     steps:
       - uses: actions/checkout@v5
         with:
@@ -37,5 +39,7 @@ jobs:
           context: .
           file: docker/datasets/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/llm-lab-datasets:${{ github.ref_name }}
+          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
