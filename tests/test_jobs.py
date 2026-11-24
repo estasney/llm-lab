@@ -34,6 +34,9 @@ class FakeVast:
     unavailable_offers: set[int] = field(default_factory=set)
     actual_statuses: Iterator[str] = field(default_factory=lambda: iter(["loading", "running"]))
     log_text: str = "step 1\nllm-lab-job-exit-code=0\n"
+    missing_instance_response: httpx.Response = field(
+        default_factory=lambda: httpx.Response(404, json={"success": False, "error": "not_found"})
+    )
     fail_before: dict[tuple[str, str], Callable[[], httpx.Response]] = field(default_factory=dict)
     live_instances: dict[int, str] = field(default_factory=dict)
     rented_offers: list[int] = field(default_factory=list)
@@ -61,6 +64,8 @@ class FakeVast:
                     return failure()
                 return httpx.Response(200, json={"success": True, "new_contract": instance_id})
             case "PUT", ["api", "v0", "instances", "request_logs", instance_id]:
+                if failure := self.fail_before.get(("PUT", "request_logs")):
+                    return failure()
                 return httpx.Response(200, json={"success": True, "result_url": f"https://logs.test/{instance_id}.log"})
             case "GET", ["api", "v0", "instances", instance_id]:
                 if failure := self.fail_before.get(("GET", "instances")):
@@ -74,7 +79,7 @@ class FakeVast:
                 return httpx.Response(200, json={"success": True, "instances": matching})
             case "DELETE", ["api", "v0", "instances", instance_id]:
                 if int(instance_id) not in self.live_instances:
-                    return httpx.Response(404, json={"success": False, "error": "not_found"})
+                    return self.missing_instance_response
                 del self.live_instances[int(instance_id)]
                 return httpx.Response(200, json={"success": True})
             case _:
@@ -150,7 +155,16 @@ def test_job_rents_the_offer_with_the_lowest_price_and_destroys_the_instance_aft
         "disk": 40.0,
         "label": "llm-lab-job-train",
         "runtype": "args",
-        "args": ["sh", "-c", "python train.py --note 'two words'; echo \"llm-lab-job-exit-code=$?\""],
+        "args": [
+            "sh",
+            "-c",
+            "if [ -e /llm-lab-job-done ]; then exit 0; fi\n"
+            "python train.py --note 'two words'\n"
+            "exit_code=$?\n"
+            "touch /llm-lab-job-done\n"
+            'echo "llm-lab-job-exit-code=$exit_code"\n'
+            "sleep 300",
+        ],
         "env": {"SEED": "1"},
     }
 
@@ -202,6 +216,29 @@ def test_job_is_aborted_and_its_instance_destroyed_when_the_container_exits_with
     assert isinstance(record.status, Aborted)
     assert "exited" in record.status.reason
     assert workbench.vast.live_instances == {}
+
+
+def test_job_is_aborted_when_the_log_of_an_exited_instance_is_refused(workbench: Workbench) -> None:
+    workbench.vast.actual_statuses = iter(["exited"])
+    workbench.vast.fail_before[("PUT", "request_logs")] = lambda: httpx.Response(404)
+
+    record = workbench.orchestrator.execute(build_spec())
+
+    assert isinstance(record.status, Aborted)
+    assert workbench.vast.live_instances == {}
+
+
+def test_abandon_accepts_an_error_from_the_destroy_request_when_the_instance_does_not_exist(
+    workbench: Workbench,
+) -> None:
+    workbench.vast.missing_instance_response = httpx.Response(400, json={"success": False, "error": "invalid_args"})
+    workbench.store.write(
+        JobRecord(spec=build_spec(), status=Running(submitted_at=datetime(2026, 1, 1, tzinfo=UTC), instance_id=501))
+    )
+
+    record = workbench.orchestrator.abandon("train")
+
+    assert isinstance(record.status, Aborted)
 
 
 def test_instance_is_destroyed_when_observation_raises_an_error(workbench: Workbench) -> None:

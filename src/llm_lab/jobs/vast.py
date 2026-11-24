@@ -20,6 +20,7 @@ class VastSettings(BaseSettings):
     retry_delay_seconds: float = 2
     offer_limit: int = 10
     log_tail_lines: int = 200
+    completion_linger_seconds: int = 300
 
 
 class Offer(BaseModel):
@@ -77,14 +78,24 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
     }
 
 
-def build_instance_request(spec: JobSpec) -> dict[str, object]:
+def build_instance_request(spec: JobSpec, completion_linger_seconds: int) -> dict[str, object]:
+    script = "\n".join(
+        [
+            "if [ -e /llm-lab-job-done ]; then exit 0; fi",
+            shlex.join(spec.command),
+            "exit_code=$?",
+            "touch /llm-lab-job-done",
+            'echo "llm-lab-job-exit-code=$exit_code"',
+            f"sleep {completion_linger_seconds}",
+        ]
+    )
     return {
         "client_id": "me",
         "image": spec.image,
         "disk": spec.disk_gb,
         "label": label_job(spec.name),
         "runtype": "args",
-        "args": ["sh", "-c", f'{shlex.join(spec.command)}; echo "llm-lab-job-exit-code=$?"'],
+        "args": ["sh", "-c", script],
         "env": dict(spec.environment),
     }
 
@@ -125,7 +136,9 @@ class VastInstanceProvider:
                 assert_never(spec.placement)
 
     def rent_offer(self, offer_id: int, spec: JobSpec) -> int | None:
-        response = self.call_api("PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec))
+        response = self.call_api(
+            "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, self.settings.completion_linger_seconds)
+        )
         if response.status_code in {404, 410}:
             return None
         response.raise_for_status()
@@ -140,8 +153,14 @@ class VastInstanceProvider:
         if view is None:
             return Halted("missing")
         match view.actual_status:
-            case "running" | "exited":
-                return classify(view.actual_status, self.read_reported_exit_code(instance_id))
+            case "running" | "exited" as actual_status:
+                requested = self.call_api(
+                    "PUT", f"/v0/instances/request_logs/{instance_id}/", {"tail": str(self.settings.log_tail_lines)}
+                )
+                if actual_status == "exited" and requested.is_client_error:
+                    return Halted(actual_status)
+                requested.raise_for_status()
+                return classify(actual_status, self.download_reported_exit_code(requested))
             case _:
                 return classify(view.actual_status, None)
 
@@ -169,14 +188,15 @@ class VastInstanceProvider:
 
     def destroy(self, instance_id: int) -> None:
         response = self.call_api("DELETE", f"/v0/instances/{instance_id}/", {})
-        if response.status_code != 404:
-            response.raise_for_status()
+        if response.is_success or response.status_code == 404:
+            return
+        match self.observe(instance_id):
+            case Halted(instance_state="missing"):
+                return
+            case _:
+                response.raise_for_status()
 
-    def read_reported_exit_code(self, instance_id: int) -> int | None:
-        requested = self.call_api(
-            "PUT", f"/v0/instances/request_logs/{instance_id}/", {"tail": str(self.settings.log_tail_lines)}
-        )
-        requested.raise_for_status()
+    def download_reported_exit_code(self, requested: httpx.Response) -> int | None:
         log = self.send_with_retries(
             "GET", RequestedLog.model_validate_json(requested.content).result_url, {403, 404, 500, 502, 503, 504}
         )
