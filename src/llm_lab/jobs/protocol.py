@@ -33,6 +33,7 @@ class ResourceRequest(BaseModel):
     gpu_name: Annotated[str, Field(min_length=1)]
     gpu_count: PositiveInt
     max_dollars_per_hour: PositiveFloat
+    min_cuda: PositiveFloat = 13.0
 
 
 class ExplicitOffer(BaseModel):

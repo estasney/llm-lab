@@ -53,6 +53,7 @@ def label_job(job_name: str) -> str:
 
 def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> dict[str, object]:
     return {
+        "cuda_max_good": {"gte": request.min_cuda},
         "gpu_name": {"eq": request.gpu_name},
         "num_gpus": {"eq": request.gpu_count},
         "disk_space": {"gte": disk_gb},

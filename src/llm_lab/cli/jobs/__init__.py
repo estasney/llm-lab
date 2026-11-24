@@ -4,13 +4,12 @@ from typing import Annotated, assert_never
 
 import typer
 import yaml
-from pydantic import ValidationError
 from sqlalchemy import select
 
 from llm_lab.cli.db.deps import DatabaseSessionDep
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs.deps import JobOrchestratorDep
-from llm_lab.errors import CommandError
+from llm_lab.cli.yaml_files import reading_yaml_file
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 
@@ -44,13 +43,8 @@ type JobNameArgument = Annotated[
 
 
 def load_job_spec(manifest: Path) -> JobSpec:
-    try:
+    with reading_yaml_file(manifest, "job manifest"):
         return JobSpec.model_validate(yaml.safe_load(manifest.read_text()))
-    except yaml.YAMLError as error:
-        raise CommandError(f"{manifest} is not valid YAML: {error}") from error
-    except ValidationError as error:
-        problems = [f"  {'.'.join(str(part) for part in item['loc'])}: {item['msg']}" for item in error.errors()]
-        raise CommandError("\n".join([f"{manifest} is not a valid job manifest:", *problems])) from error
 
 
 def report(record: JobRecord) -> None:
