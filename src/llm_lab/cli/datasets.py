@@ -1,6 +1,6 @@
-import typer
+from llm_lab.cli.dependent_typer import DependentTyper
 
-app = typer.Typer(name="datasets", no_args_is_help=True)
+app = DependentTyper(name="datasets", no_args_is_help=True)
 
 
 @app.command("create")
