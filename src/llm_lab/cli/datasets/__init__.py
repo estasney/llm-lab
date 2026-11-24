@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -11,7 +12,7 @@ from llm_lab.cli.yaml_files import reading_yaml_file
 from llm_lab.datasets.designer import DatasetDesigner
 from llm_lab.datasets.hub import DatasetHub, HubDataset, parse_hub_dataset
 from llm_lab.datasets.job import build_dataset_job
-from llm_lab.datasets.recipe import Recipe, parse_recipe
+from llm_lab.datasets.recipe import Recipe, RecipeFile, parse_recipe
 from llm_lab.errors import CommandError
 from llm_lab.settings import SettingsDep
 
@@ -67,6 +68,11 @@ def create_dataset(
     with server.serve(recipe):
         directory = designer.create(recipe, dataset.name, rows)
     typer.echo(hub.publish(dataset, directory, recipe))
+
+
+@app.command("schema", help="Print the JSON schema of recipe files.")
+def print_recipe_schema() -> None:
+    typer.echo(json.dumps(RecipeFile.model_json_schema(), indent=2))
 
 
 @app.command("list")
