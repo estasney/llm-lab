@@ -29,6 +29,8 @@ A recipe has three sections:
    docker push <registry>/llm-lab-datasets:<tag>
    ```
 
+   The build args `PYTHON_IMAGE`, `UV_IMAGE` and `VLLM_VERSION` set the base image, the uv image and the vLLM version.
+
 4. Set `LLM_LAB_DATASETS_IMAGE` to the reference of that image.
 
 Jobs rent only hosts whose driver supports CUDA 13.0 or newer, unless the placement sets another `min_cuda`.
