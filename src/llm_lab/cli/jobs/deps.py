@@ -5,7 +5,7 @@ from typing import Annotated
 
 import httpx
 
-from llm_lab.cli.db.deps import DatabaseEngineDep
+from llm_lab.cli.db.deps import DatabaseSessionDep
 from llm_lab.dependencies import Depends
 from llm_lab.jobs.orchestrator import InstanceProvider, JobOrchestrator
 from llm_lab.jobs.secrets import SettingsSecretSource
@@ -31,9 +31,9 @@ type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_prov
 
 
 def get_job_orchestrator(
-    settings: SettingsDep, provider: InstanceProviderDep, engine: DatabaseEngineDep
+    settings: SettingsDep, provider: InstanceProviderDep, session: DatabaseSessionDep
 ) -> JobOrchestrator:
-    return JobOrchestrator(provider, engine, SettingsSecretSource(settings), lambda: datetime.now(UTC))
+    return JobOrchestrator(provider, session, SettingsSecretSource(settings), lambda: datetime.now(UTC))
 
 
 type JobOrchestratorDep = Annotated[JobOrchestrator, Depends(get_job_orchestrator)]

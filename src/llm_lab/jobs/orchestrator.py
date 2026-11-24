@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Protocol, assert_never
 
 from pydantic import SecretStr
-from sqlalchemy import Engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from llm_lab.jobs.protocol import (
@@ -42,13 +42,13 @@ class JobOrchestrator:
     def __init__(
         self,
         provider: InstanceProvider,
-        engine: Engine,
+        session: Session,
         secret_source: SecretSource,
         read_clock: Callable[[], datetime],
     ) -> None:
         self.provider = provider
         self.secret_source = secret_source
-        self.engine = engine
+        self.session = session
         self.read_clock = read_clock
 
     def submit(self, spec: JobSpec) -> JobRecord:
@@ -105,8 +105,7 @@ class JobOrchestrator:
                 assert_never(record.status)
 
     def sync_all(self) -> Sequence[JobRecord]:
-        with Session(self.engine) as session:
-            names = [row.name for row in session.scalars(select_latest_transitions())]
+        names = [row.name for row in self.session.scalars(select_latest_transitions())]
         return [self.sync(name) for name in names]
 
     def abandon(self, name: str) -> JobRecord:
@@ -134,22 +133,19 @@ class JobOrchestrator:
         return record
 
     def read_latest(self, name: str) -> JobRecord | None:
-        with Session(self.engine) as session:
-            record = session.scalar(
-                select(JobTransitionRow.record)
-                .where(JobTransitionRow.name == name)
-                .order_by(JobTransitionRow.sequence.desc())
-                .limit(1)
-            )
+        record = self.session.scalar(
+            select(JobTransitionRow.record)
+            .where(JobTransitionRow.name == name)
+            .order_by(JobTransitionRow.sequence.desc())
+            .limit(1)
+        )
         return None if record is None else JobRecord.model_validate_json(record)
 
     def record_transition(self, record: JobRecord) -> None:
-        with Session(self.engine) as session, session.begin():
-            session.add(
-                JobTransitionRow(
-                    name=record.spec.name, condition=record.status.condition, record=record.model_dump_json()
-                )
-            )
+        self.session.add(
+            JobTransitionRow(name=record.spec.name, condition=record.status.condition, record=record.model_dump_json())
+        )
+        self.session.commit()
 
     def rent_instance(
         self, spec: JobSpec, secrets: Mapping[str, SecretStr], pending: Pending, rented: list[int]

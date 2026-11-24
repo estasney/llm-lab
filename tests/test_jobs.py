@@ -138,10 +138,10 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
     keyring.set_password("llm-lab", "VAST_API_KEY", "secret-key")
     keyring.set_password("llm-lab", "HF_TOKEN", "hf-secret-value")
     monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "jobs.sqlite3"))
-    get_settings.cache_clear()
     settings = Settings()
-    engine = settings.create_database_engine()
+    engine = settings.database_engine
     command.upgrade(build_migration_config(engine), "head")
+    session = Session(engine)
     provider = VastInstanceProvider(
         settings,
         SecretStr("secret-key"),
@@ -152,11 +152,18 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
         vast,
         engine,
         provider,
-        JobOrchestrator(provider, engine, SettingsSecretSource(settings), SteppingClock().read),
+        JobOrchestrator(provider, session, SettingsSecretSource(settings), SteppingClock().read),
         sleeps,
     )
+    session.close()
     engine.dispose()
+    discard_cached_settings()
     keyring.set_keyring(previous_keyring)
+
+
+def discard_cached_settings() -> None:
+    get_settings().database_engine.dispose()
+    get_settings.cache_clear()
 
 
 def read_conditions(engine: Engine, name: str) -> list[str]:
@@ -500,7 +507,7 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
         invoke("submit", str(manifest))
     with pytest.raises(LookupError, match="WANDB_API_KEY"):
         CliRunner().invoke(overridden, ["secrets", "set", "WANDB_API_KEY"], catch_exceptions=False)
-    get_settings.cache_clear()
+    discard_cached_settings()
     result = CliRunner().invoke(overridden, ["secrets", "set", "HF_TOKEN"], input="wandb-secret-value\n")
     assert "wandb-secret-value" not in result.output
     submit_code, submit_output = invoke("submit", str(manifest))

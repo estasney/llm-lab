@@ -1,18 +1,15 @@
 from collections.abc import Iterator
 from typing import Annotated
 
-from sqlalchemy import Engine
+from sqlalchemy.orm import Session
 
 from llm_lab.dependencies import Depends
 from llm_lab.settings import SettingsDep
 
 
-def get_database_engine(settings: SettingsDep) -> Iterator[Engine]:
-    engine = settings.create_database_engine()
-    try:
-        yield engine
-    finally:
-        engine.dispose()
+def get_database_session(settings: SettingsDep) -> Iterator[Session]:
+    with Session(settings.database_engine) as session:
+        yield session
 
 
-type DatabaseEngineDep = Annotated[Engine, Depends(get_database_engine)]
+type DatabaseSessionDep = Annotated[Session, Depends(get_database_session)]

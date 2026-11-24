@@ -1,4 +1,4 @@
-from functools import cache
+from functools import cache, cached_property
 from pathlib import Path
 from typing import Annotated
 
@@ -44,7 +44,8 @@ class Settings(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return init_settings, env_settings, KeyringSettingsSource(settings_cls)
 
-    def create_database_engine(self) -> Engine:
+    @cached_property
+    def database_engine(self) -> Engine:
         self.job_database_path.parent.mkdir(parents=True, exist_ok=True)
         engine = create_engine(URL.create("sqlite", database=str(self.job_database_path)))
         event.listen(engine, "connect", apply_sqlite_pragmas)
