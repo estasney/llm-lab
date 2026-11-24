@@ -1,8 +1,50 @@
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
+
+from llm_lab.datasets.hub import HubDataset
+from llm_lab.datasets.recipe import Recipe, parse_recipe
+
+
+def build_model_config(alias: str, model: str = "Qwen/Qwen3-8B", provider: str = "vllm") -> dict[str, str]:
+    return {"alias": alias, "model": model, "provider": provider}
+
+
+def build_recipe_source(
+    model_configs: list[dict[str, str]], *, prompt: str = "Write one sentence about {{ topic }}.", **sections: object
+) -> str:
+    return yaml.safe_dump(
+        {
+            "job": {
+                "disk_gb": 120,
+                "ttl_seconds_after_finished": 600,
+                "placement": {
+                    "kind": "resources",
+                    "gpu_name": "RTX 6000Ada",
+                    "gpu_count": 2,
+                    "max_dollars_per_hour": 2.5,
+                },
+            },
+            "vllm_args": ["--tensor-parallel-size", "2"],
+            "data_designer": {
+                "model_configs": model_configs,
+                "columns": [
+                    {
+                        "name": "topic",
+                        "column_type": "sampler",
+                        "sampler_type": "category",
+                        "params": {"values": ["tides", "volcanoes"]},
+                    },
+                    {"name": "sentence", "column_type": "llm-text", "model_alias": "writer", "prompt": prompt},
+                ],
+            },
+            **sections,
+        }
+    )
 
 
 @dataclass
@@ -16,8 +58,40 @@ class Journal:
         return self.opened
 
 
+@dataclass
+class FakeDesigner:
+    journal: Journal
+    directory: Path
+
+    def validate(self, recipe: Recipe) -> None:
+        self.journal.events.append(f"validate {recipe.served_model}")
+
+    def create(self, recipe: Recipe, name: str, rows: int) -> Path:
+        self.journal.events.append(f"create {name} {rows}")
+        return self.directory
+
+
+@dataclass
+class FakeHub:
+    journal: Journal
+    existing: set[str] = field(default_factory=set[str])
+
+    def exists(self, dataset: HubDataset) -> bool:
+        self.journal.events.append(f"exists {dataset.repo_id}")
+        return dataset.repo_id in self.existing
+
+    def publish(self, dataset: HubDataset, directory: Path, recipe: Recipe) -> str:
+        self.journal.events.append(f"publish {dataset.repo_id} {directory.name}")
+        return f"https://huggingface.co/datasets/{dataset.repo_id}"
+
+
 def run_cli(app: typer.Typer, arguments: list[str]) -> str:
     return CliRunner().invoke(app, arguments, catch_exceptions=False).output
+
+
+def invoke_cli(app: typer.Typer, arguments: list[str]) -> tuple[int, str]:
+    result = CliRunner().invoke(app, arguments, catch_exceptions=False)
+    return result.exit_code, result.output
 
 
 def follow_context_chain(error: BaseException) -> list[BaseException]:
@@ -30,3 +104,20 @@ def follow_context_chain(error: BaseException) -> list[BaseException]:
 @pytest.fixture
 def journal() -> Journal:
     return Journal()
+
+
+@pytest.fixture
+def recipe_source() -> str:
+    return build_recipe_source([build_model_config("writer")])
+
+
+@pytest.fixture
+def recipe(recipe_source: str) -> Recipe:
+    return parse_recipe(recipe_source)
+
+
+@pytest.fixture
+def recipe_path(tmp_path: Path, recipe_source: str) -> Path:
+    path = tmp_path / "sentences.yaml"
+    path.write_text(recipe_source)
+    return path

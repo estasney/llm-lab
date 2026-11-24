@@ -1,0 +1,92 @@
+import json
+import threading
+from collections.abc import Generator
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+from llm_lab.datasets.designer import DataDesignerRunner
+from llm_lab.datasets.recipe import Recipe, parse_recipe
+from llm_lab.errors import CommandError
+from llm_lab.settings import Settings
+from tests.conftest import build_model_config, build_recipe_source
+
+
+@dataclass
+class ChatServer:
+    port: int
+    models: list[str] = field(default_factory=list)
+
+
+def serve_chat_completions(server: ChatServer) -> type[BaseHTTPRequestHandler]:
+    class ChatCompletionHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            server.models.append(request["model"])
+            body = json.dumps(
+                {
+                    "id": "chat",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": request["model"],
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": "A generated sentence."},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    return ChatCompletionHandler
+
+
+@pytest.fixture
+def chat_server() -> Generator[ChatServer]:
+    server = ChatServer(port=0)
+    with ThreadingHTTPServer(("127.0.0.1", 0), serve_chat_completions(server)) as http:
+        server.port = http.server_address[1]
+        thread = threading.Thread(target=http.serve_forever)
+        thread.start()
+        yield server
+        http.shutdown()
+        thread.join()
+
+
+def build_runner(tmp_path: Path, port: int) -> DataDesignerRunner:
+    return DataDesignerRunner(Settings(artifacts_dir=tmp_path / "artifacts", vllm_port=port))
+
+
+def test_validate_accepts_a_recipe_whose_prompts_name_its_columns(tmp_path: Path, recipe: Recipe) -> None:
+    build_runner(tmp_path, 8000).validate(recipe)
+
+
+def test_validate_rejects_a_prompt_that_names_a_missing_column(tmp_path: Path) -> None:
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], prompt="Write about {{ season }}."))
+
+    with pytest.raises(CommandError, match="Data Designer rejected the recipe"):
+        build_runner(tmp_path, 8000).validate(recipe)
+
+
+def test_create_generates_the_rows_with_the_served_model(
+    tmp_path: Path, recipe: Recipe, chat_server: ChatServer
+) -> None:
+    directory = build_runner(tmp_path, chat_server.port).create(recipe, "sentences", 4)
+
+    dataset = pd.read_parquet(directory / "parquet-files")
+    actual = (directory.parent, len(dataset), set(dataset["sentence"].tolist()), set(chat_server.models))
+    expected = (tmp_path / "artifacts", 4, {"A generated sentence."}, {"Qwen/Qwen3-8B"})
+    assert actual == expected, f"Expected {expected}, got {actual}."

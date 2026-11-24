@@ -70,6 +70,36 @@ class Settings(BaseSettings):
         description="Number of last log lines that are read from an instance to find the exit code of the job.",
         examples=[200],
     )
+    datasets_image: str | None = Field(
+        default=None,
+        description="Reference of the published datasets image that a dataset job runs.",
+        examples=["ghcr.io/example/llm-lab-datasets:0.1.2"],
+    )
+    artifacts_dir: Path = Field(
+        default=Path(".llm-lab/artifacts"),
+        description="Directory where Data Designer writes the generated datasets.",
+        examples=[".llm-lab/artifacts", "/workspace/artifacts"],
+    )
+    vllm_port: PositiveInt = Field(
+        default=8000, description="Port of the vLLM server on the loopback interface.", examples=[8000]
+    )
+    vllm_startup_timeout_seconds: PositiveFloat = Field(
+        default=3600,
+        description="Time limit in seconds for vLLM to download and load the model.",
+        examples=[3600],
+    )
+    vllm_poll_seconds: PositiveFloat = Field(
+        default=5, description="Delay in seconds between two health checks of vLLM.", examples=[5, 0.5]
+    )
+    vllm_stop_timeout_seconds: PositiveFloat = Field(
+        default=60,
+        description="Time in seconds that vLLM gets to stop before it is killed.",
+        examples=[60],
+    )
+
+    @property
+    def vllm_base_url(self) -> str:
+        return f"http://127.0.0.1:{self.vllm_port}"
 
     @classmethod
     def settings_customise_sources(
