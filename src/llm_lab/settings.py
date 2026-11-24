@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_LAB_")
 
     job_database_path: Path = Path(".llm-lab/jobs.sqlite3")
-    keyring_service_name: str = "llm-lab"
+    hf_token: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username="HF_TOKEN")] = None
     vast_api_key: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username="VAST_API_KEY")] = None
     vast_api_url: str = "https://console.vast.ai/api"
     vast_request_attempts: int = 5

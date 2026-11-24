@@ -11,10 +11,10 @@ import typer
 import yaml
 
 from llm_lab.cli.dependent_typer import DependentTyper
-from llm_lab.cli.secrets import SecretSourceDep
 from llm_lab.dependencies import Depends
 from llm_lab.jobs.orchestrator import InstanceProvider, JobOrchestrator
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
+from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.jobs.store import SqliteJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import SettingsDep
@@ -49,9 +49,9 @@ type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_prov
 
 
 def get_job_orchestrator(
-    provider: InstanceProviderDep, store: JobRecordStoreDep, secret_source: SecretSourceDep
+    settings: SettingsDep, provider: InstanceProviderDep, store: JobRecordStoreDep
 ) -> JobOrchestrator:
-    return JobOrchestrator(provider, store, secret_source, lambda: datetime.now(UTC))
+    return JobOrchestrator(provider, store, SettingsSecretSource(settings), lambda: datetime.now(UTC))
 
 
 type JobOrchestratorDep = Annotated[JobOrchestrator, Depends(get_job_orchestrator)]
