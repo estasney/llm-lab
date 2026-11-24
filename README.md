@@ -22,18 +22,21 @@ A recipe has three sections:
 
 1. Run `llm-lab db upgrade` to create the job database.
 2. Run `llm-lab secrets set VAST_API_KEY` and `llm-lab secrets set HF_TOKEN`. The job receives the Hugging Face token to download the model and to upload the dataset. Use a fine-grained token, because the instance runs on a machine that you do not control.
-3. Build the image from the repository root and push it to a registry that Vast.ai can pull from:
-
-   ```sh
-   docker build -f docker/datasets/Dockerfile -t <registry>/llm-lab-datasets:<tag> .
-   docker push <registry>/llm-lab-datasets:<tag>
-   ```
-
-   The build args `PYTHON_IMAGE`, `UV_IMAGE` and `VLLM_VERSION` set the base image, the uv image and the vLLM version.
-
-4. Set `LLM_LAB_DATASETS_IMAGE` to the reference of that image.
+3. Set `LLM_LAB_DATASETS_IMAGE` to `ghcr.io/estasney/llm-lab-datasets:v<version>`, where `<version>` is the llm-lab version that you run.
 
 Jobs rent only hosts whose driver supports CUDA 13.0 or newer, unless the placement sets another `min_cuda`.
+
+## Image
+
+The Version workflow tags each merge to `main` and starts the Image workflow for that tag. The Image workflow builds `docker/datasets/Dockerfile` and pushes it to `ghcr.io/estasney/llm-lab-datasets:<tag>`. To build the image of an existing tag again, run the Image workflow from the Actions tab and select the tag.
+
+To build the image yourself, run this from the repository root:
+
+```sh
+docker build -f docker/datasets/Dockerfile -t <registry>/llm-lab-datasets:<tag> .
+```
+
+The build args `PYTHON_IMAGE`, `UV_IMAGE` and `VLLM_VERSION` set the base image, the uv image and the vLLM version.
 
 ## Commands
 
