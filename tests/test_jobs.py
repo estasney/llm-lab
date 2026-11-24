@@ -12,13 +12,13 @@ from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from keyring.backend import KeyringBackend
 from pydantic import SecretStr, ValidationError
-from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy import Engine, select, text
 from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
 from llm_lab.cli.jobs.deps import get_http_client
-from llm_lab.database import build_database_url, build_migration_config
+from llm_lab.database import build_migration_config
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -140,8 +140,8 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
     monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "jobs.sqlite3"))
     get_settings.cache_clear()
     settings = Settings()
-    command.upgrade(build_migration_config(settings), "head")
-    engine = create_engine(build_database_url(settings))
+    engine = settings.create_database_engine()
+    command.upgrade(build_migration_config(engine), "head")
     provider = VastInstanceProvider(
         settings,
         SecretStr("secret-key"),
@@ -221,6 +221,16 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
         stored = "".join(connection.execute(text("SELECT record FROM job_transitions")).scalars())
     assert '"secret_environment":["HF_TOKEN"]' in stored
     assert "hf-secret-value" not in stored
+
+
+def test_each_database_connection_has_the_sqlite_pragmas(workbench: Workbench) -> None:
+    with workbench.engine.connect() as first, workbench.engine.connect() as second:
+        for connection in (first, second):
+            pragmas = {
+                name: connection.execute(text(f"PRAGMA {name}")).scalar_one()
+                for name in ("foreign_keys", "journal_mode", "synchronous", "busy_timeout")
+            }
+            assert pragmas == {"foreign_keys": 1, "journal_mode": "wal", "synchronous": 1, "busy_timeout": 5000}
 
 
 def test_migrations_create_the_schema_of_the_models(workbench: Workbench) -> None:

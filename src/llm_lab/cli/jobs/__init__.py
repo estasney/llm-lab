@@ -7,8 +7,9 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from llm_lab.cli.db.deps import DatabaseEngineDep
 from llm_lab.cli.dependent_typer import DependentTyper
-from llm_lab.cli.jobs.deps import DatabaseEngineDep, JobOrchestratorDep
+from llm_lab.cli.jobs.deps import JobOrchestratorDep
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 

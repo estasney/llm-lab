@@ -4,9 +4,21 @@ from typing import Annotated
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+from sqlalchemy import URL, Engine, create_engine, event
+from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.pool import ConnectionPoolEntry
 
 from llm_lab.dependencies import Depends
 from llm_lab.keyring_settings import KeyringEntry, KeyringSettingsSource
+
+
+def apply_sqlite_pragmas(dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
 
 
 class Settings(BaseSettings):
@@ -31,6 +43,12 @@ class Settings(BaseSettings):
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         return init_settings, env_settings, KeyringSettingsSource(settings_cls)
+
+    def create_database_engine(self) -> Engine:
+        self.job_database_path.parent.mkdir(parents=True, exist_ok=True)
+        engine = create_engine(URL.create("sqlite", database=str(self.job_database_path)))
+        event.listen(engine, "connect", apply_sqlite_pragmas)
+        return engine
 
 
 @cache
