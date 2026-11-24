@@ -75,6 +75,12 @@ class Settings(BaseSettings):
         description="Reference of the published datasets image that a dataset job runs.",
         examples=["ghcr.io/example/llm-lab-datasets:0.1.2"],
     )
+    datasets_image_min_cuda: PositiveFloat = Field(
+        default=13.0,
+        description="Lowest CUDA version that a host driver must support to run the datasets image. "
+        "The default matches the vLLM base image of docker/datasets.",
+        examples=[13.0],
+    )
     artifacts_dir: Path = Field(
         default=Path(".llm-lab/artifacts"),
         description="Directory where Data Designer writes the generated datasets.",

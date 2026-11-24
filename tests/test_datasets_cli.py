@@ -13,9 +13,9 @@ from llm_lab.cli.datasets.deps import get_dataset_designer, get_dataset_hub, get
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs.deps import get_job_orchestrator
 from llm_lab.datasets.hub import HubDataset
-from llm_lab.datasets.job import build_dataset_job
+from llm_lab.datasets.job import build_dataset_job, require_image_cuda
 from llm_lab.datasets.recipe import Recipe
-from llm_lab.jobs.protocol import JobRecord, JobSpec, Running
+from llm_lab.jobs.protocol import ExplicitOffer, JobRecord, JobSpec, PlacementKind, ResourceRequest, Running
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings, get_settings
 from tests.conftest import FakeDesigner, FakeHub, Journal, build_model_config, build_recipe_source, invoke_cli, run_cli
@@ -118,7 +118,9 @@ def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
         cli, ["datasets", "submit", str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"]
     )
 
-    expected = [build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")]
+    expected = [
+        build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1", 13.0)
+    ]
     assert orchestrator.submitted == expected, f"Expected {expected}, got {orchestrator.submitted}."
     assert (exit_code, JobRecord.model_validate_json(output).status.condition) == (0, "running"), f"Got {output!r}."
     assert journal.events == ["validate Qwen/Qwen3-8B", "exists lab/sentences"], f"Got {journal.events}."
@@ -136,7 +138,7 @@ def test_submit_requires_the_datasets_image(journal: Journal, recipe_path: Path)
 
 
 def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: Recipe) -> None:
-    spec = build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
+    spec = build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1", 13.0)
 
     decoded = gzip.decompress(base64.b64decode(spec.environment["LLM_LAB_RECIPE"])).decode()
     actual = (spec.name, spec.image, spec.command, set(spec.environment), spec.secret_environment, spec.disk_gb)
@@ -149,5 +151,44 @@ def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: R
         120,
     )
     assert actual == expected, f"Expected {expected}, got {actual}."
-    assert (spec.ttl_seconds_after_finished, spec.placement) == (600, recipe.job.placement), "Expected the recipe job."
+    expected_placement = ResourceRequest(
+        kind=PlacementKind.resources, gpu_name="RTX 6000Ada", gpu_count=2, max_dollars_per_hour=2.5, min_cuda=13.0
+    )
+    assert (spec.ttl_seconds_after_finished, spec.placement) == (600, expected_placement), f"Got {spec}."
     assert decoded == recipe.source, "Expected the job to carry the recipe file unchanged."
+
+
+@pytest.mark.parametrize(
+    ("placement", "expected"),
+    [
+        (
+            ResourceRequest(kind=PlacementKind.resources, gpu_name="H100", gpu_count=1, max_dollars_per_hour=3.0),
+            13.0,
+        ),
+        (
+            ResourceRequest(
+                kind=PlacementKind.resources, gpu_name="H100", gpu_count=1, max_dollars_per_hour=3.0, min_cuda=12.8
+            ),
+            13.0,
+        ),
+        (
+            ResourceRequest(
+                kind=PlacementKind.resources, gpu_name="H100", gpu_count=1, max_dollars_per_hour=3.0, min_cuda=13.1
+            ),
+            13.1,
+        ),
+    ],
+    ids=["recipe-without-floor", "recipe-floor-below-image", "recipe-floor-above-image"],
+)
+def test_dataset_job_requires_the_higher_cuda_floor_of_the_recipe_and_the_image(
+    placement: ResourceRequest, expected: float
+) -> None:
+    actual = require_image_cuda(placement, 13.0)
+
+    assert actual == placement.model_copy(update={"min_cuda": expected}), f"Expected min_cuda {expected}, got {actual}."
+
+
+def test_dataset_job_keeps_an_explicit_offer() -> None:
+    offer = ExplicitOffer(kind=PlacementKind.offer, offer_id=42)
+
+    assert require_image_cuda(offer, 13.0) == offer, "Expected the explicit offer unchanged."

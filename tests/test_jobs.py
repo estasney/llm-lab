@@ -33,7 +33,7 @@ from llm_lab.jobs.protocol import (
 )
 from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.jobs.tables import Base, JobTransitionRow
-from llm_lab.jobs.vast import VastInstanceProvider
+from llm_lab.jobs.vast import VastInstanceProvider, build_offer_query
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings, get_settings
 
@@ -570,3 +570,16 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
         condition,
     ]
     assert workbench.vast.live_instances == {}
+
+
+@pytest.mark.parametrize(("min_cuda", "expected"), [(None, None), (13.0, {"gte": 13.0})], ids=["no-floor", "floor"])
+def test_offer_query_filters_on_the_cuda_floor_of_the_request(
+    min_cuda: float | None, expected: dict[str, float] | None
+) -> None:
+    request = ResourceRequest(
+        kind=PlacementKind.resources, gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0, min_cuda=min_cuda
+    )
+
+    actual = build_offer_query(request, 40, 10).get("cuda_max_good")
+
+    assert actual == expected, f"Expected the CUDA filter {expected}, got {actual}."

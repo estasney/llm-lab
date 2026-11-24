@@ -52,7 +52,15 @@ def label_job(job_name: str) -> str:
 
 
 def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> dict[str, object]:
+    match request.min_cuda:
+        case None:
+            cuda_filter: dict[str, object] = {}
+        case int() | float() as min_cuda:
+            cuda_filter = {"cuda_max_good": {"gte": min_cuda}}
+        case _:
+            assert_never(request.min_cuda)
     return {
+        **cuda_filter,
         "gpu_name": {"eq": request.gpu_name},
         "num_gpus": {"eq": request.gpu_count},
         "disk_space": {"gte": disk_gb},

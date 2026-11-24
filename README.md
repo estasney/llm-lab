@@ -31,7 +31,7 @@ A recipe has three sections:
 
 4. Set `LLM_LAB_DATASETS_IMAGE` to the reference of that image.
 
-The Vast.ai host must support CUDA 13.0, which the vLLM base image uses.
+Dataset jobs only rent hosts whose driver supports CUDA 13.0, which the vLLM base image needs. Change `LLM_LAB_DATASETS_IMAGE_MIN_CUDA` when the base image changes.
 
 ## Commands
 
