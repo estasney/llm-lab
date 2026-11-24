@@ -2,6 +2,8 @@ from typing import Annotated
 
 import typer
 from alembic import command
+from alembic.migration import MigrationContext
+from sqlalchemy import Engine
 
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.database import build_migration_config
@@ -14,10 +16,18 @@ def prompt_for_revision_message() -> str:
     return typer.prompt("Revision message", type=str)
 
 
+def read_revision(engine: Engine) -> str | None:
+    with engine.connect() as connection:
+        return MigrationContext.configure(connection).get_current_revision()
+
+
 @app.command("upgrade", help="Apply migrations.")
 def upgrade_database(settings: SettingsDep) -> None:
-    command.upgrade(build_migration_config(settings.database_engine), "head")
-    typer.echo("Database is current.")
+    engine = settings.database_engine
+    before = read_revision(engine)
+    command.upgrade(build_migration_config(engine), "head")
+    after = read_revision(engine)
+    typer.echo("Already current." if before == after else f"Migrated to {after}.")
 
 
 @app.command("revision", help="Create a migration.")

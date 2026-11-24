@@ -241,6 +241,19 @@ def test_each_database_connection_has_the_sqlite_pragmas(workbench: Workbench) -
             assert pragmas == {"foreign_keys": 1, "journal_mode": "wal", "synchronous": 1, "busy_timeout": 5000}
 
 
+def test_cli_upgrade_reports_whether_it_applied_a_migration(
+    tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "new.sqlite3"))
+    discard_cached_settings()
+
+    first = CliRunner().invoke(app, ["db", "upgrade"], catch_exceptions=False)
+    second = CliRunner().invoke(app, ["db", "upgrade"], catch_exceptions=False)
+
+    assert first.output == "Migrated to 9395d98d9cb4.\n"
+    assert second.output == "Already current.\n"
+
+
 def test_migrations_create_the_schema_of_the_models(workbench: Workbench) -> None:
     with workbench.engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
