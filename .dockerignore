@@ -4,6 +4,4 @@
 !README.md
 !src
 !docker/datasets/dataset-job.sh
-!docker/datasets/vllm/pyproject.toml
-!docker/datasets/vllm/uv.lock
 **/__pycache__
