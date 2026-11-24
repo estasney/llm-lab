@@ -32,6 +32,7 @@ class JobSpec(BaseModel):
     command: Annotated[tuple[str, ...], Field(min_length=1)]
     environment: Mapping[str, str] = Field(default_factory=dict)
     disk_gb: PositiveFloat
+    ttl_seconds_after_finished: PositiveInt
     placement: Annotated[ResourceRequest | ExplicitOffer, Field(discriminator="kind")]
 
 

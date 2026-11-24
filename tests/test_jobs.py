@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -11,19 +12,19 @@ from typer.testing import CliRunner
 
 from llm_lab.cli import app
 from llm_lab.cli.jobs import get_instance_provider, get_job_record_store
-from llm_lab.jobs.orchestrator import FileJobRecordStore, JobOrchestrator
+from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
     ExplicitOffer,
     Failed,
-    JobRecord,
     JobSpec,
+    Pending,
     ResourceRequest,
     Running,
     Succeeded,
 )
+from llm_lab.jobs.store import SqliteJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider, VastSettings
-from llm_lab.settings import Settings
 
 
 @dataclass
@@ -99,26 +100,25 @@ class SteppingClock:
 @dataclass
 class Workbench:
     vast: FakeVast
-    store: FileJobRecordStore
+    store: SqliteJobRecordStore
     provider: VastInstanceProvider
     orchestrator: JobOrchestrator
     sleeps: list[float]
 
 
 @pytest.fixture
-def workbench(tmp_path: Path) -> Workbench:
+def workbench(tmp_path: Path) -> Iterator[Workbench]:
     vast = FakeVast()
     sleeps: list[float] = []
-    settings = Settings(job_records_directory=tmp_path / "records")
-    store = FileJobRecordStore(settings)
     provider = VastInstanceProvider(
         VastSettings(api_key=SecretStr("secret-key")),
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
-    return Workbench(
-        vast, store, provider, JobOrchestrator(settings, provider, store, SteppingClock().read, sleeps.append), sleeps
-    )
+    connection = sqlite3.connect(tmp_path / "jobs.sqlite3")
+    store = SqliteJobRecordStore(connection)
+    yield Workbench(vast, store, provider, JobOrchestrator(provider, store, SteppingClock().read), sleeps)
+    connection.close()
 
 
 def build_spec(placement: ResourceRequest | ExplicitOffer | None = None) -> JobSpec:
@@ -128,25 +128,21 @@ def build_spec(placement: ResourceRequest | ExplicitOffer | None = None) -> JobS
         command=("python", "train.py", "--note", "two words"),
         environment={"SEED": "1"},
         disk_gb=40,
+        ttl_seconds_after_finished=600,
         placement=placement
         or ResourceRequest(kind="resources", gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0),
     )
 
 
-def test_job_rents_the_offer_with_the_lowest_price_and_destroys_the_instance_after_success(
-    workbench: Workbench,
-) -> None:
-    record = workbench.orchestrator.execute(build_spec())
+def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_instance_runs(workbench: Workbench) -> None:
+    record = workbench.orchestrator.submit(build_spec())
 
-    submitted_at = datetime(2026, 1, 1, tzinfo=UTC)
-    assert record.status == Succeeded(
-        submitted_at=submitted_at, finished_at=submitted_at + timedelta(seconds=5), instance_id=9000
-    )
-    assert workbench.store.read("train") == record
+    assert record.status == Running(submitted_at=datetime(2026, 1, 1, tzinfo=UTC), instance_id=9000)
+    assert workbench.store.read_latest("train") == record
     assert workbench.vast.rented_offers == [11]
-    assert workbench.vast.live_instances == {}
-    assert workbench.sleeps == [15]
-    search, rent = (json.loads(request.content) for request in workbench.vast.requests[:2])
+    assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
+    assert workbench.sleeps == []
+    search, rent = (json.loads(request.content) for request in workbench.vast.requests)
     assert search["gpu_name"] == {"eq": "RTX 4090"}
     assert search["dph_total"] == {"lte": 1.0}
     assert rent == {
@@ -158,98 +154,132 @@ def test_job_rents_the_offer_with_the_lowest_price_and_destroys_the_instance_aft
         "args": [
             "sh",
             "-c",
-            "if [ -e /llm-lab-job-done ]; then exit 0; fi\n"
+            "if [ ! -e /llm-lab-job-done ]; then\n"
             "python train.py --note 'two words'\n"
             "exit_code=$?\n"
             "touch /llm-lab-job-done\n"
             'echo "llm-lab-job-exit-code=$exit_code"\n'
-            "sleep 300",
+            "fi\n"
+            "sleep 600\n"
+            'curl -fsS -X DELETE -H "Authorization: Bearer $CONTAINER_API_KEY" '
+            '"https://console.vast.ai/api/v0/instances/$CONTAINER_ID/"',
         ],
         "env": {"SEED": "1"},
     }
 
 
-def test_job_with_nonzero_exit_code_is_recorded_as_failed_and_its_instance_is_destroyed(workbench: Workbench) -> None:
-    workbench.vast.log_text = "Traceback\nllm-lab-job-exit-code=3\n"
+def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_code(workbench: Workbench) -> None:
+    workbench.vast.log_text = "step 1\n"
+    submitted = workbench.orchestrator.submit(build_spec())
 
-    record = workbench.orchestrator.execute(build_spec())
+    assert workbench.orchestrator.sync("train") == submitted
+    assert workbench.orchestrator.sync("train") == submitted
+    assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
+    assert len(workbench.store.read_history("train")) == 2
 
-    assert isinstance(record.status, Failed)
-    assert record.status.exit_code == 3
+
+@pytest.mark.parametrize(
+    ("log_text", "status_type"), [("llm-lab-job-exit-code=0\n", Succeeded), ("llm-lab-job-exit-code=3\n", Failed)]
+)
+def test_sync_records_the_exit_code_and_destroys_the_instance(
+    workbench: Workbench, log_text: str, status_type: type[Succeeded | Failed]
+) -> None:
+    workbench.vast.log_text = log_text
+    workbench.vast.actual_statuses = iter(["running"])
+    workbench.orchestrator.submit(build_spec())
+
+    record = workbench.orchestrator.sync("train")
+
+    assert isinstance(record.status, status_type)
+    assert workbench.store.read_latest("train") == record
+    assert workbench.vast.live_instances == {}
+    assert [type(transition.record.status) for transition in workbench.store.read_history("train")] == [
+        Pending,
+        Running,
+        status_type,
+    ]
+    assert workbench.orchestrator.sync("train") == record
+
+
+def test_sync_all_finishes_each_job_that_is_not_finished(workbench: Workbench) -> None:
+    workbench.vast.actual_statuses = iter(["running", "running"])
+    workbench.orchestrator.submit(build_spec())
+    workbench.orchestrator.submit(build_spec().model_copy(update={"name": "evaluate"}))
+
+    records = workbench.orchestrator.sync_all()
+
+    assert [(record.spec.name, record.status.condition) for record in records] == [
+        ("evaluate", "succeeded"),
+        ("train", "succeeded"),
+    ]
     assert workbench.vast.live_instances == {}
 
 
-def test_job_rents_the_next_offer_when_an_offer_is_not_available(workbench: Workbench) -> None:
-    workbench.vast.unavailable_offers = {11}
+def test_sync_records_a_job_as_aborted_when_its_instance_destroyed_itself(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec())
+    workbench.vast.live_instances.clear()
 
-    record = workbench.orchestrator.execute(build_spec())
-
-    assert isinstance(record.status, Succeeded)
-    assert workbench.vast.rented_offers == [12]
-
-
-def test_job_with_an_explicit_offer_rents_that_offer_without_a_search(workbench: Workbench) -> None:
-    record = workbench.orchestrator.execute(build_spec(ExplicitOffer(kind="offer", offer_id=77)))
-
-    assert isinstance(record.status, Succeeded)
-    assert workbench.vast.rented_offers == [77]
-    assert workbench.vast.requests[0].method == "PUT"
-
-
-def test_job_is_aborted_when_no_offer_is_available(workbench: Workbench) -> None:
-    workbench.vast.offers = []
-
-    record = workbench.orchestrator.execute(build_spec())
+    record = workbench.orchestrator.sync("train")
 
     assert isinstance(record.status, Aborted)
-    assert workbench.vast.rented_offers == []
+    assert "missing" in record.status.reason
 
 
-def test_job_is_aborted_and_its_instance_destroyed_when_the_container_exits_without_an_exit_code(
-    workbench: Workbench,
+@pytest.mark.parametrize("request_logs_response", [None, httpx.Response(404)])
+def test_sync_records_a_job_as_aborted_and_destroys_the_instance_when_the_container_exited_without_an_exit_code(
+    workbench: Workbench, request_logs_response: httpx.Response | None
 ) -> None:
-    workbench.vast.actual_statuses = iter(["loading", "exited"])
+    workbench.vast.actual_statuses = iter(["exited"])
     workbench.vast.log_text = "killed\n"
+    if request_logs_response is not None:
+        workbench.vast.fail_before[("PUT", "request_logs")] = lambda: request_logs_response
+    workbench.orchestrator.submit(build_spec())
 
-    record = workbench.orchestrator.execute(build_spec())
+    record = workbench.orchestrator.sync("train")
 
     assert isinstance(record.status, Aborted)
     assert "exited" in record.status.reason
     assert workbench.vast.live_instances == {}
 
 
-def test_job_is_aborted_when_the_log_of_an_exited_instance_is_refused(workbench: Workbench) -> None:
-    workbench.vast.actual_statuses = iter(["exited"])
-    workbench.vast.fail_before[("PUT", "request_logs")] = lambda: httpx.Response(404)
+def test_submit_rents_the_next_offer_when_an_offer_is_not_available(workbench: Workbench) -> None:
+    workbench.vast.unavailable_offers = {11}
 
-    record = workbench.orchestrator.execute(build_spec())
+    record = workbench.orchestrator.submit(build_spec())
+
+    assert isinstance(record.status, Running)
+    assert workbench.vast.rented_offers == [12]
+
+
+def test_submit_with_an_explicit_offer_rents_that_offer_without_a_search(workbench: Workbench) -> None:
+    record = workbench.orchestrator.submit(build_spec(ExplicitOffer(kind="offer", offer_id=77)))
+
+    assert isinstance(record.status, Running)
+    assert workbench.vast.rented_offers == [77]
+    assert workbench.vast.requests[0].method == "PUT"
+
+
+def test_submit_records_a_job_as_aborted_when_no_offer_is_available(workbench: Workbench) -> None:
+    workbench.vast.offers = []
+
+    record = workbench.orchestrator.submit(build_spec())
 
     assert isinstance(record.status, Aborted)
-    assert workbench.vast.live_instances == {}
+    assert workbench.vast.rented_offers == []
 
 
-def test_abandon_accepts_an_error_from_the_destroy_request_when_the_instance_does_not_exist(
+def test_submit_rejects_a_job_name_that_is_not_finished_and_accepts_it_after_the_job_finished(
     workbench: Workbench,
 ) -> None:
-    workbench.vast.missing_instance_response = httpx.Response(400, json={"success": False, "error": "invalid_args"})
-    workbench.store.write(
-        JobRecord(spec=build_spec(), status=Running(submitted_at=datetime(2026, 1, 1, tzinfo=UTC), instance_id=501))
-    )
+    workbench.vast.actual_statuses = iter(["running"])
+    workbench.orchestrator.submit(build_spec())
 
-    record = workbench.orchestrator.abandon("train")
+    with pytest.raises(ValueError, match="not finished"):
+        workbench.orchestrator.submit(build_spec())
 
-    assert isinstance(record.status, Aborted)
-
-
-def test_instance_is_destroyed_when_observation_raises_an_error(workbench: Workbench) -> None:
-    workbench.vast.fail_before[("GET", "instances")] = lambda: httpx.Response(500)
-
-    with pytest.raises(httpx.HTTPStatusError):
-        workbench.orchestrator.execute(build_spec())
-
-    assert workbench.vast.rented_offers == [11]
-    assert workbench.vast.live_instances == {}
-    assert isinstance(workbench.store.read("train").status, Running)
+    workbench.orchestrator.sync("train")
+    assert isinstance(workbench.orchestrator.submit(build_spec()).status, Running)
+    assert workbench.vast.rented_offers == [11, 11]
 
 
 def raise_read_timeout() -> httpx.Response:
@@ -260,36 +290,63 @@ def test_instance_is_destroyed_when_the_response_of_the_rent_request_is_lost(wor
     workbench.vast.fail_before[("PUT", "asks")] = raise_read_timeout
 
     with pytest.raises(httpx.ReadTimeout):
-        workbench.orchestrator.execute(build_spec())
+        workbench.orchestrator.submit(build_spec())
 
     assert workbench.vast.rented_offers == [11]
     assert workbench.vast.live_instances == {}
+    record = workbench.orchestrator.sync("train")
+    assert isinstance(record.status, Aborted)
+
+
+def test_sync_keeps_the_job_running_when_observation_raises_an_error(workbench: Workbench) -> None:
+    submitted = workbench.orchestrator.submit(build_spec())
+    workbench.vast.fail_before[("GET", "instances")] = lambda: httpx.Response(500)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        workbench.orchestrator.sync("train")
+
+    assert workbench.store.read_latest("train") == submitted
+    assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
 
 
 def test_rate_limited_request_is_sent_again_after_a_delay(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec())
     responses = iter([httpx.Response(429), httpx.Response(429)])
     workbench.vast.fail_before[("GET", "instances")] = lambda: (
         next(responses, None) or httpx.Response(200, json={"instances": {"actual_status": "running"}})
     )
 
-    record = workbench.orchestrator.execute(build_spec())
+    record = workbench.orchestrator.sync("train")
 
     assert isinstance(record.status, Succeeded)
     assert workbench.sleeps == [2, 4]
 
 
-def test_abandon_destroys_the_instance_of_a_running_job_and_records_the_job_as_aborted(workbench: Workbench) -> None:
-    spec = build_spec()
-    workbench.vast.live_instances = {501: "llm-lab-job-train", 502: "llm-lab-job-train", 503: "llm-lab-job-other"}
-    workbench.store.write(
-        JobRecord(spec=spec, status=Running(submitted_at=datetime(2026, 1, 1, tzinfo=UTC), instance_id=501))
-    )
+@pytest.mark.parametrize(
+    "missing_instance_response",
+    [
+        httpx.Response(404, json={"success": False, "error": "not_found"}),
+        httpx.Response(400, json={"success": False, "error": "invalid_args"}),
+    ],
+)
+def test_abandon_destroys_each_instance_of_the_job_and_records_the_job_as_aborted(
+    workbench: Workbench, missing_instance_response: httpx.Response
+) -> None:
+    workbench.vast.missing_instance_response = missing_instance_response
+    workbench.orchestrator.submit(build_spec())
+    workbench.vast.live_instances |= {502: "llm-lab-job-train", 503: "llm-lab-job-other"}
 
     record = workbench.orchestrator.abandon("train")
 
     assert isinstance(record.status, Aborted)
-    assert workbench.store.read("train") == record
+    assert workbench.store.read_latest("train") == record
     assert workbench.vast.live_instances == {503: "llm-lab-job-other"}
+    assert workbench.orchestrator.abandon("train") == record
+
+
+def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
+    with pytest.raises(LookupError):
+        workbench.orchestrator.sync("absent")
 
 
 @pytest.mark.parametrize(
@@ -298,6 +355,7 @@ def test_abandon_destroys_the_instance_of_a_running_job_and_records_the_job_as_a
         {"name": "Not/A/Name"},
         {"command": []},
         {"retries": 2},
+        {"ttl_seconds_after_finished": 0},
         {"placement": {"kind": "resources", "gpu_name": "RTX 4090"}},
     ],
 )
@@ -307,26 +365,37 @@ def test_invalid_manifest_is_rejected(change: dict[str, object]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("log_text", "cli_exit_code"), [("llm-lab-job-exit-code=0\n", 0), ("llm-lab-job-exit-code=7\n", 1)]
+    ("log_text", "status_exit_code"), [("llm-lab-job-exit-code=0\n", 0), ("llm-lab-job-exit-code=7\n", 1)]
 )
-def test_cli_runs_a_manifest_file_and_reports_the_record(
-    tmp_path: Path, workbench: Workbench, log_text: str, cli_exit_code: int
+def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
+    tmp_path: Path, workbench: Workbench, log_text: str, status_exit_code: int
 ) -> None:
     workbench.vast.log_text = log_text
     workbench.vast.actual_statuses = iter(["running"])
     manifest = tmp_path / "job.yaml"
     manifest.write_text(
         "name: train\nimage: ghcr.io/example/train:1\ncommand: [python, train.py]\ndisk_gb: 40\n"
+        "ttl_seconds_after_finished: 600\n"
         "placement:\n  kind: resources\n  gpu_name: RTX 4090\n  gpu_count: 1\n  max_dollars_per_hour: 1.0\n"
     )
     overridden = app.with_dependency_overrides(
         {get_job_record_store: lambda: workbench.store, get_instance_provider: lambda: workbench.provider}
     )
 
-    run_result = CliRunner().invoke(overridden, ["jobs", "run", str(manifest)], catch_exceptions=False)
-    status_result = CliRunner().invoke(overridden, ["jobs", "status", "train"], catch_exceptions=False)
+    def invoke(*arguments: str) -> tuple[int, str]:
+        result = CliRunner().invoke(overridden, ["jobs", *arguments], catch_exceptions=False)
+        return result.exit_code, result.output
 
-    assert run_result.exit_code == cli_exit_code
-    assert JobRecord.model_validate_json(run_result.output) == workbench.store.read("train")
-    assert status_result.output == run_result.output
+    assert invoke("submit", str(manifest))[0] == 0
+    assert invoke("list") == (0, "train\trunning\n")
+    status_code, status_output = invoke("status", "train")
+    condition = "succeeded" if status_exit_code == 0 else "failed"
+    assert status_code == status_exit_code
+    assert f'"condition": "{condition}"' in status_output
+    assert invoke("sync") == (0, f"train\t{condition}\n")
+    assert [line.split('"condition":"')[1].split('"')[0] for line in invoke("history", "train")[1].splitlines()] == [
+        "pending",
+        "running",
+        condition,
+    ]
     assert workbench.vast.live_instances == {}

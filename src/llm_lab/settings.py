@@ -10,8 +10,7 @@ from llm_lab.dependencies import Depends
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_LAB_")
 
-    job_records_directory: Path = Path(".llm-lab/jobs")
-    job_poll_interval_seconds: float = 15
+    job_database_path: Path = Path(".llm-lab/jobs.sqlite3")
 
 
 @cache

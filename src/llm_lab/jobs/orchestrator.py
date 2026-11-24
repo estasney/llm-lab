@@ -15,7 +15,6 @@ from llm_lab.jobs.protocol import (
     Succeeded,
     conclude,
 )
-from llm_lab.settings import Settings
 
 
 class InstanceProvider(Protocol):
@@ -31,52 +30,76 @@ class InstanceProvider(Protocol):
 
 
 class JobRecordStore(Protocol):
-    def write(self, record: JobRecord) -> None: ...
+    def append(self, record: JobRecord) -> None: ...
 
-    def read(self, name: str) -> JobRecord: ...
+    def read_latest(self, name: str) -> JobRecord | None: ...
 
-
-class FileJobRecordStore:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-
-    def write(self, record: JobRecord) -> None:
-        self.settings.job_records_directory.mkdir(parents=True, exist_ok=True)
-        (self.settings.job_records_directory / f"{record.spec.name}.json").write_text(record.model_dump_json(indent=2))
-
-    def read(self, name: str) -> JobRecord:
-        return JobRecord.model_validate_json((self.settings.job_records_directory / f"{name}.json").read_text())
+    def list_latest(self) -> Sequence[JobRecord]: ...
 
 
 class JobOrchestrator:
-    def __init__(
-        self,
-        settings: Settings,
-        provider: InstanceProvider,
-        store: JobRecordStore,
-        read_clock: Callable[[], datetime],
-        sleep: Callable[[float], None],
-    ) -> None:
-        self.settings = settings
+    def __init__(self, provider: InstanceProvider, store: JobRecordStore, read_clock: Callable[[], datetime]) -> None:
         self.provider = provider
         self.store = store
         self.read_clock = read_clock
-        self.sleep = sleep
 
-    def execute(self, spec: JobSpec) -> JobRecord:
+    def submit(self, spec: JobSpec) -> JobRecord:
+        previous = self.store.read_latest(spec.name)
+        if previous is not None:
+            match previous.status:
+                case Pending() | Running():
+                    raise ValueError(f"job {spec.name!r} is not finished, so it cannot be submitted again")
+                case Succeeded() | Failed() | Aborted():
+                    pass
+                case _:
+                    assert_never(previous.status)
         pending = Pending(submitted_at=self.read_clock())
-        self.store.write(JobRecord(spec=spec, status=pending))
+        self.store.append(JobRecord(spec=spec, status=pending))
         rented: list[int] = []
+        recorded = False
         try:
-            status = self.run_on_rented_instance(spec, pending, rented)
+            record = JobRecord(spec=spec, status=self.rent_instance(spec, pending, rented))
+            self.store.append(record)
+            recorded = True
         finally:
-            self.destroy_instances(spec.name, rented)
-        record = JobRecord(spec=spec, status=status)
-        self.store.write(record)
+            if not recorded:
+                self.destroy_instances(spec.name, rented)
         return record
 
+    def sync(self, name: str) -> JobRecord:
+        record = self.read(name)
+        match record.status:
+            case Pending(submitted_at=submitted_at):
+                return self.finish(
+                    record.spec,
+                    [],
+                    Aborted(
+                        submitted_at=submitted_at,
+                        finished_at=self.read_clock(),
+                        reason="the submission stopped before an instance was recorded",
+                    ),
+                )
+            case Running(instance_id=instance_id) as running:
+                observation = self.provider.observe(instance_id)
+                match observation:
+                    case Active():
+                        return record
+                    case Completed() | Halted():
+                        return self.finish(
+                            record.spec, [instance_id], conclude(running, self.read_clock(), observation)
+                        )
+                    case _:
+                        assert_never(observation)
+            case Succeeded() | Failed() | Aborted():
+                return record
+            case _:
+                assert_never(record.status)
+
+    def sync_all(self) -> Sequence[JobRecord]:
+        return [self.sync(record.spec.name) for record in self.store.list_latest()]
+
     def abandon(self, name: str) -> JobRecord:
-        record = self.store.read(name)
+        record = self.read(name)
         match record.status:
             case Pending(submitted_at=submitted_at):
                 known_instances: list[int] = []
@@ -87,40 +110,33 @@ class JobOrchestrator:
                 return record
             case _:
                 assert_never(record.status)
-        self.destroy_instances(name, known_instances)
-        abandoned = JobRecord(
-            spec=record.spec,
-            status=Aborted(
-                submitted_at=submitted_at, finished_at=self.read_clock(), reason="abandoned by the operator"
-            ),
+        return self.finish(
+            record.spec,
+            known_instances,
+            Aborted(submitted_at=submitted_at, finished_at=self.read_clock(), reason="abandoned by the operator"),
         )
-        self.store.write(abandoned)
-        return abandoned
 
-    def run_on_rented_instance(
-        self, spec: JobSpec, pending: Pending, rented: list[int]
-    ) -> Succeeded | Failed | Aborted:
+    def read(self, name: str) -> JobRecord:
+        record = self.store.read_latest(name)
+        if record is None:
+            raise LookupError(f"no job has the name {name!r}")
+        return record
+
+    def rent_instance(self, spec: JobSpec, pending: Pending, rented: list[int]) -> Running | Aborted:
         for offer_id in self.provider.find_offers(spec):
             instance_id = self.provider.rent_offer(offer_id, spec)
             if instance_id is not None:
                 rented.append(instance_id)
-                running = Running(submitted_at=pending.submitted_at, instance_id=instance_id)
-                self.store.write(JobRecord(spec=spec, status=running))
-                return conclude(running, self.read_clock(), self.wait_for_outcome(instance_id))
+                return Running(submitted_at=pending.submitted_at, instance_id=instance_id)
         return Aborted(
             submitted_at=pending.submitted_at, finished_at=self.read_clock(), reason="no offer was available to rent"
         )
 
-    def wait_for_outcome(self, instance_id: int) -> Completed | Halted:
-        while True:
-            observation = self.provider.observe(instance_id)
-            match observation:
-                case Active():
-                    self.sleep(self.settings.job_poll_interval_seconds)
-                case Completed() | Halted():
-                    return observation
-                case _:
-                    assert_never(observation)
+    def finish(self, spec: JobSpec, known_instances: Sequence[int], status: Succeeded | Failed | Aborted) -> JobRecord:
+        self.destroy_instances(spec.name, known_instances)
+        record = JobRecord(spec=spec, status=status)
+        self.store.append(record)
+        return record
 
     def destroy_instances(self, job_name: str, known_instances: Sequence[int]) -> None:
         for instance_id in known_instances:

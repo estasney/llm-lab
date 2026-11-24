@@ -20,7 +20,6 @@ class VastSettings(BaseSettings):
     retry_delay_seconds: float = 2
     offer_limit: int = 10
     log_tail_lines: int = 200
-    completion_linger_seconds: int = 300
 
 
 class Offer(BaseModel):
@@ -78,15 +77,18 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
     }
 
 
-def build_instance_request(spec: JobSpec, completion_linger_seconds: int) -> dict[str, object]:
+def build_instance_request(spec: JobSpec, api_url: str) -> dict[str, object]:
     script = "\n".join(
         [
-            "if [ -e /llm-lab-job-done ]; then exit 0; fi",
+            "if [ ! -e /llm-lab-job-done ]; then",
             shlex.join(spec.command),
             "exit_code=$?",
             "touch /llm-lab-job-done",
             'echo "llm-lab-job-exit-code=$exit_code"',
-            f"sleep {completion_linger_seconds}",
+            "fi",
+            f"sleep {spec.ttl_seconds_after_finished}",
+            'curl -fsS -X DELETE -H "Authorization: Bearer $CONTAINER_API_KEY" '
+            f'"{api_url}/v0/instances/$CONTAINER_ID/"',
         ]
     )
     return {
@@ -136,9 +138,7 @@ class VastInstanceProvider:
                 assert_never(spec.placement)
 
     def rent_offer(self, offer_id: int, spec: JobSpec) -> int | None:
-        response = self.call_api(
-            "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, self.settings.completion_linger_seconds)
-        )
+        response = self.call_api("PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, self.settings.api_url))
         if response.status_code in {404, 410}:
             return None
         response.raise_for_status()

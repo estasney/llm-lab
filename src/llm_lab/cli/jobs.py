@@ -1,10 +1,10 @@
 import os
-import signal
+import sqlite3
 import time
 from collections.abc import Iterator
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-from types import FrameType
 from typing import Annotated, assert_never
 
 import httpx
@@ -14,19 +14,22 @@ from pydantic import SecretStr
 
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.dependencies import Depends
-from llm_lab.jobs.orchestrator import FileJobRecordStore, InstanceProvider, JobOrchestrator, JobRecordStore
+from llm_lab.jobs.orchestrator import InstanceProvider, JobOrchestrator
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
+from llm_lab.jobs.store import SqliteJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider, VastSettings
 from llm_lab.settings import SettingsDep
 
 app = DependentTyper(name="jobs", no_args_is_help=True)
 
 
-def get_job_record_store(settings: SettingsDep) -> JobRecordStore:
-    return FileJobRecordStore(settings)
+def get_job_record_store(settings: SettingsDep) -> Iterator[SqliteJobRecordStore]:
+    settings.job_database_path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(settings.job_database_path)) as connection:
+        yield SqliteJobRecordStore(connection)
 
 
-type JobRecordStoreDep = Annotated[JobRecordStore, Depends(get_job_record_store)]
+type JobRecordStoreDep = Annotated[SqliteJobRecordStore, Depends(get_job_record_store)]
 
 
 def get_instance_provider() -> Iterator[InstanceProvider]:
@@ -37,18 +40,8 @@ def get_instance_provider() -> Iterator[InstanceProvider]:
 type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_provider)]
 
 
-def exit_on_termination(signal_number: int, frame: FrameType | None) -> None:
-    raise SystemExit(128 + signal_number)
-
-
-def get_job_orchestrator(
-    settings: SettingsDep, provider: InstanceProviderDep, store: JobRecordStoreDep
-) -> Iterator[JobOrchestrator]:
-    previous_handler = signal.signal(signal.SIGTERM, exit_on_termination)
-    try:
-        yield JobOrchestrator(settings, provider, store, lambda: datetime.now(UTC), time.sleep)
-    finally:
-        signal.signal(signal.SIGTERM, previous_handler)
+def get_job_orchestrator(provider: InstanceProviderDep, store: JobRecordStoreDep) -> JobOrchestrator:
+    return JobOrchestrator(provider, store, lambda: datetime.now(UTC))
 
 
 type JobOrchestratorDep = Annotated[JobOrchestrator, Depends(get_job_orchestrator)]
@@ -65,16 +58,34 @@ def report(record: JobRecord) -> None:
             assert_never(record.status)
 
 
-@app.command("run")
-def run_job(
+@app.command("submit")
+def submit_job(
     manifest: Annotated[Path, typer.Argument(exists=True, dir_okay=False)], orchestrator: JobOrchestratorDep
 ) -> None:
-    report(orchestrator.execute(JobSpec.model_validate(yaml.safe_load(manifest.read_text()))))
+    report(orchestrator.submit(JobSpec.model_validate(yaml.safe_load(manifest.read_text()))))
 
 
 @app.command("status")
-def show_job_status(name: str, store: JobRecordStoreDep) -> None:
-    report(store.read(name))
+def show_job_status(name: str, orchestrator: JobOrchestratorDep) -> None:
+    report(orchestrator.sync(name))
+
+
+@app.command("sync")
+def sync_jobs(orchestrator: JobOrchestratorDep) -> None:
+    for record in orchestrator.sync_all():
+        typer.echo(f"{record.spec.name}\t{record.status.condition}")
+
+
+@app.command("list")
+def list_jobs(store: JobRecordStoreDep) -> None:
+    for record in store.list_latest():
+        typer.echo(f"{record.spec.name}\t{record.status.condition}")
+
+
+@app.command("history")
+def show_job_history(name: str, store: JobRecordStoreDep) -> None:
+    for transition in store.read_history(name):
+        typer.echo(f"{transition.recorded_at.isoformat()}\t{transition.record.status.model_dump_json()}")
 
 
 @app.command("destroy")
