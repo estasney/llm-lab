@@ -16,7 +16,7 @@ from llm_lab.dependencies import Depends
 from llm_lab.jobs.orchestrator import InstanceProvider, JobOrchestrator
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
 from llm_lab.jobs.store import SqliteJobRecordStore
-from llm_lab.jobs.vast import VastInstanceProvider, VastSettings
+from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import SettingsDep
 
 app = DependentTyper(name="jobs", no_args_is_help=True)
@@ -39,15 +39,10 @@ def get_http_client() -> Iterator[httpx.Client]:
 type HttpClientDep = Annotated[httpx.Client, Depends(get_http_client)]
 
 
-def get_vast_settings() -> VastSettings:
-    return VastSettings.model_validate({})
-
-
-type VastSettingsDep = Annotated[VastSettings, Depends(get_vast_settings)]
-
-
-def get_instance_provider(vast_settings: VastSettingsDep, http: HttpClientDep) -> InstanceProvider:
-    return VastInstanceProvider(vast_settings, http, time.sleep)
+def get_instance_provider(settings: SettingsDep, http: HttpClientDep) -> InstanceProvider:
+    if settings.vast_api_key is None:
+        raise LookupError("the Vast.ai API key is not set, so set it with `llm-lab secrets set VAST_API_KEY`")
+    return VastInstanceProvider(settings, settings.vast_api_key, http, time.sleep)
 
 
 type InstanceProviderDep = Annotated[InstanceProvider, Depends(get_instance_provider)]

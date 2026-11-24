@@ -2,36 +2,13 @@ import json
 import re
 import shlex
 from collections.abc import Callable, Mapping, Sequence
-from typing import Annotated, assert_never
+from typing import assert_never
 
 import httpx
 from pydantic import BaseModel, SecretStr
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 from llm_lab.jobs.protocol import Active, Completed, ExplicitOffer, Halted, JobSpec, ResourceRequest
-from llm_lab.keyring_settings import KeyringEntry, KeyringSettingsSource
-
-
-class VastSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="VAST_")
-
-    api_key: Annotated[SecretStr, KeyringEntry(service="llm-lab", username="VAST_API_KEY")]
-    api_url: str = "https://console.vast.ai/api"
-    request_attempts: int = 5
-    retry_delay_seconds: float = 2
-    offer_limit: int = 10
-    log_tail_lines: int = 200
-
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return init_settings, env_settings, KeyringSettingsSource(settings_cls)
+from llm_lab.settings import Settings
 
 
 class Offer(BaseModel):
@@ -130,8 +107,11 @@ def classify(actual_status: str | None, exit_code: int | None) -> Active | Compl
 
 
 class VastInstanceProvider:
-    def __init__(self, settings: VastSettings, http: httpx.Client, sleep: Callable[[float], None]) -> None:
+    def __init__(
+        self, settings: Settings, api_key: SecretStr, http: httpx.Client, sleep: Callable[[float], None]
+    ) -> None:
         self.settings = settings
+        self.api_key = api_key
         self.http = http
         self.sleep = sleep
 
@@ -141,7 +121,7 @@ class VastInstanceProvider:
                 return [offer_id]
             case ResourceRequest() as request:
                 response = self.call_api(
-                    "POST", "/v0/bundles/", build_offer_query(request, spec.disk_gb, self.settings.offer_limit)
+                    "POST", "/v0/bundles/", build_offer_query(request, spec.disk_gb, self.settings.vast_offer_limit)
                 )
                 response.raise_for_status()
                 offers = OfferPage.model_validate_json(response.content).offers
@@ -151,7 +131,7 @@ class VastInstanceProvider:
 
     def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[str, SecretStr]) -> int | None:
         response = self.call_api(
-            "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, secrets, self.settings.api_url)
+            "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, secrets, self.settings.vast_api_url)
         )
         if response.status_code in {404, 410}:
             return None
@@ -169,7 +149,9 @@ class VastInstanceProvider:
         match view.actual_status:
             case "running" | "exited" as actual_status:
                 requested = self.call_api(
-                    "PUT", f"/v0/instances/request_logs/{instance_id}/", {"tail": str(self.settings.log_tail_lines)}
+                    "PUT",
+                    f"/v0/instances/request_logs/{instance_id}/",
+                    {"tail": str(self.settings.vast_log_tail_lines)},
                 )
                 if actual_status == "exited" and requested.is_client_error:
                     return Halted(actual_status)
@@ -188,7 +170,7 @@ class VastInstanceProvider:
         while True:
             response = self.send_with_retries(
                 "GET",
-                f"{self.settings.api_url}/v1/instances/",
+                f"{self.settings.vast_api_url}/v1/instances/",
                 {500, 502, 503, 504},
                 headers=self.authorize(),
                 params=params,
@@ -220,11 +202,11 @@ class VastInstanceProvider:
         return read_exit_code(log.text)
 
     def authorize(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.settings.api_key.get_secret_value()}"}
+        return {"Authorization": f"Bearer {self.api_key.get_secret_value()}"}
 
     def call_api(self, method: str, path: str, body: object) -> httpx.Response:
         return self.send_with_retries(
-            method, f"{self.settings.api_url}{path}", {500, 502, 503, 504}, headers=self.authorize(), json=body
+            method, f"{self.settings.vast_api_url}{path}", {500, 502, 503, 504}, headers=self.authorize(), json=body
         )
 
     def send_with_retries(
@@ -238,9 +220,9 @@ class VastInstanceProvider:
         json: object = None,
     ) -> httpx.Response:
         response = self.http.request(method, url, headers=headers, params=params, json=json)
-        for attempt in range(1, self.settings.request_attempts):
+        for attempt in range(1, self.settings.vast_request_attempts):
             if response.status_code != 429 and response.status_code not in retried_statuses:
                 break
-            self.sleep(self.settings.retry_delay_seconds * attempt)
+            self.sleep(self.settings.vast_retry_delay_seconds * attempt)
             response = self.http.request(method, url, headers=headers, params=params, json=json)
         return response

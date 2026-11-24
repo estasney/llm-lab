@@ -27,7 +27,8 @@ from llm_lab.jobs.protocol import (
 )
 from llm_lab.jobs.secrets import KeyringSecretSource
 from llm_lab.jobs.store import SqliteJobRecordStore
-from llm_lab.jobs.vast import VastInstanceProvider, VastSettings
+from llm_lab.jobs.vast import VastInstanceProvider
+from llm_lab.settings import Settings, get_settings
 
 
 @dataclass
@@ -134,8 +135,10 @@ def workbench(tmp_path: Path) -> Iterator[Workbench]:
     secret_source = KeyringSecretSource(keyring.get_keyring(), "llm-lab")
     secret_source.write("VAST_API_KEY", SecretStr("secret-key"))
     secret_source.write("HF_TOKEN", SecretStr("hf-secret-value"))
+    get_settings.cache_clear()
     provider = VastInstanceProvider(
-        VastSettings.model_validate({}),
+        Settings(),
+        SecretStr("secret-key"),
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
@@ -392,28 +395,30 @@ def test_abandon_destroys_each_instance_of_the_job_and_records_the_job_as_aborte
 
 
 def test_settings_read_a_keyring_entry_only_for_a_field_with_the_annotation(workbench: Workbench) -> None:
-    workbench.secret_source.write("api_url", SecretStr("https://wrong.test"))
+    workbench.secret_source.write("vast_api_url", SecretStr("https://wrong.test"))
     workbench.secret_source.write("VAST_API_URL", SecretStr("https://wrong.test"))
 
-    settings = VastSettings.model_validate({})
+    settings = Settings()
 
-    assert settings.api_key.get_secret_value() == "secret-key"
-    assert settings.api_url == "https://console.vast.ai/api"
+    assert settings.vast_api_key == SecretStr("secret-key")
+    assert settings.vast_api_url == "https://console.vast.ai/api"
 
 
 def test_settings_prefer_an_environment_variable_to_a_keyring_entry(
     workbench: Workbench, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("VAST_API_KEY", "key-from-environment")
+    monkeypatch.setenv("LLM_LAB_VAST_API_KEY", "key-from-environment")
 
-    assert VastSettings.model_validate({}).api_key.get_secret_value() == "key-from-environment"
+    assert Settings().vast_api_key == SecretStr("key-from-environment")
 
 
-def test_settings_reject_a_field_that_has_no_keyring_entry(workbench: Workbench) -> None:
+def test_cli_rejects_a_vast_command_when_the_api_key_has_no_keyring_entry(workbench: Workbench) -> None:
     keyring.delete_password("llm-lab", "VAST_API_KEY")
+    overridden = app.with_dependency_overrides({get_job_record_store: lambda: workbench.store})
 
-    with pytest.raises(ValidationError, match="api_key"):
-        VastSettings.model_validate({})
+    assert CliRunner().invoke(overridden, ["jobs", "list"], catch_exceptions=False).exit_code == 0
+    with pytest.raises(LookupError, match="secrets set VAST_API_KEY"):
+        CliRunner().invoke(overridden, ["jobs", "sync"], catch_exceptions=False)
 
 
 def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
