@@ -7,25 +7,25 @@ from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.database import build_migration_config
 from llm_lab.settings import SettingsDep
 
-app = DependentTyper(name="db", no_args_is_help=True, help="Manage the schema of the job database.")
+app = DependentTyper(name="db", no_args_is_help=True, help="Manage the job database.")
 
 
 def prompt_for_revision_message() -> str:
     return typer.prompt("Revision message", type=str)
 
 
-@app.command("upgrade", help="Apply each migration that the job database does not have.")
+@app.command("upgrade", help="Apply migrations.")
 def upgrade_database(settings: SettingsDep) -> None:
     command.upgrade(build_migration_config(settings.database_engine), "head")
-    typer.echo(f"The database {settings.job_database_path} has the latest schema.")
+    typer.echo("Database is current.")
 
 
-@app.command("revision", help="Create a migration from the difference between the models and the database.")
+@app.command("revision", help="Create a migration.")
 def create_revision(
     message: Annotated[
         str,
         typer.Argument(
-            help="Short description of the schema change. A prompt asks for it when it is omitted.",
+            help="Migration description.",
             default_factory=prompt_for_revision_message,
         ),
     ],

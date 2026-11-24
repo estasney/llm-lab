@@ -12,7 +12,7 @@ from llm_lab.cli.jobs.deps import JobOrchestratorDep
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 
-app = DependentTyper(name="jobs", no_args_is_help=True, help="Run container jobs on Vast.ai instances.")
+app = DependentTyper(name="jobs", no_args_is_help=True, help="Run jobs on Vast.ai.")
 
 
 def prompt_for_manifest() -> Path:
@@ -28,14 +28,14 @@ type ManifestArgument = Annotated[
     typer.Argument(
         exists=True,
         dir_okay=False,
-        help="YAML file that defines the job. A prompt asks for it when it is omitted.",
+        help="Job manifest file.",
         default_factory=prompt_for_manifest,
     ),
 ]
 type JobNameArgument = Annotated[
     str,
     typer.Argument(
-        help="Name of the job, as its manifest gives it. A prompt asks for it when it is omitted.",
+        help="Job name.",
         default_factory=prompt_for_job_name,
     ),
 ]
@@ -52,29 +52,29 @@ def report(record: JobRecord) -> None:
             assert_never(record.status)
 
 
-@app.command("submit", help="Rent a Vast.ai instance for the job in a manifest, record it, and exit.")
+@app.command("submit", help="Start a job.")
 def submit_job(manifest: ManifestArgument, orchestrator: JobOrchestratorDep) -> None:
     report(orchestrator.submit(JobSpec.model_validate(yaml.safe_load(manifest.read_text()))))
 
 
-@app.command("status", help="Read the instance of one job, and finish the job when its command has ended.")
+@app.command("status", help="Refresh and show a job.")
 def show_job_status(name: JobNameArgument, orchestrator: JobOrchestratorDep) -> None:
     report(orchestrator.sync(name))
 
 
-@app.command("sync", help="Read the instance of each job that is not finished, and finish those that have ended.")
+@app.command("sync", help="Refresh all unfinished jobs.")
 def sync_jobs(orchestrator: JobOrchestratorDep) -> None:
     for record in orchestrator.sync_all():
         typer.echo(f"{record.spec.name}\t{record.status.condition}")
 
 
-@app.command("list", help="Show the recorded state of each job, without a request to Vast.ai.")
+@app.command("list", help="List jobs.")
 def list_jobs(session: DatabaseSessionDep) -> None:
     for row in session.scalars(select_latest_transitions()):
         typer.echo(f"{row.name}\t{row.condition}")
 
 
-@app.command("history", help="Show each recorded state transition of one job, without a request to Vast.ai.")
+@app.command("history", help="Show the state history of a job.")
 def show_job_history(name: JobNameArgument, session: DatabaseSessionDep) -> None:
     rows = session.scalars(
         select(JobTransitionRow).where(JobTransitionRow.name == name).order_by(JobTransitionRow.sequence)
@@ -84,6 +84,6 @@ def show_job_history(name: JobNameArgument, session: DatabaseSessionDep) -> None
         typer.echo(f"{row.recorded_at.replace(tzinfo=UTC).isoformat()}\t{status.model_dump_json()}")
 
 
-@app.command("destroy", help="Destroy each Vast.ai instance of one job and record the job as aborted.")
+@app.command("destroy", help="Destroy the instances of a job.")
 def destroy_job(name: JobNameArgument, orchestrator: JobOrchestratorDep) -> None:
     report(orchestrator.abandon(name))
