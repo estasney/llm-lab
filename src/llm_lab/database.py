@@ -2,13 +2,8 @@ from importlib.resources import files
 
 from alembic.config import Config
 from sqlalchemy import URL
-from sqlalchemy.orm import DeclarativeBase
 
 from llm_lab.settings import Settings
-
-
-class Base(DeclarativeBase):
-    pass
 
 
 def build_database_url(settings: Settings) -> URL:

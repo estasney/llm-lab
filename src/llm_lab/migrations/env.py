@@ -1,7 +1,7 @@
 from alembic import context
 from sqlalchemy import create_engine
 
-from llm_lab.jobs.store import JobTransitionRow
+from llm_lab.jobs.sqlite import JobTransitionRow
 
 url = context.config.get_main_option("sqlalchemy.url")
 if url is None:

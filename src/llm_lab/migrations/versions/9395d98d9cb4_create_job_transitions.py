@@ -16,7 +16,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("condition", sa.String(), nullable=False),
         sa.Column("recorded_at", sa.DateTime(), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=False),
-        sa.Column("record", sa.Text(), nullable=False),
+        sa.Column("record", sa.String(), nullable=False),
         sa.PrimaryKeyConstraint("sequence"),
         sqlite_autoincrement=True,
     )

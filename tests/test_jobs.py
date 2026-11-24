@@ -13,12 +13,11 @@ from alembic.migration import MigrationContext
 from keyring.backend import KeyringBackend
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, create_engine, text
-from sqlalchemy.orm import sessionmaker
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
 from llm_lab.cli.jobs.deps import get_http_client
-from llm_lab.database import Base, build_database_url, build_migration_config
+from llm_lab.database import build_database_url, build_migration_config
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -31,7 +30,7 @@ from llm_lab.jobs.protocol import (
     Succeeded,
 )
 from llm_lab.jobs.secrets import SettingsSecretSource
-from llm_lab.jobs.store import SqlAlchemyJobRecordStore
+from llm_lab.jobs.sqlite import Base, SqliteJobRecordStore
 from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.settings import Settings, get_settings
 
@@ -125,7 +124,7 @@ class MemoryKeyring(KeyringBackend):
 class Workbench:
     vast: FakeVast
     engine: Engine
-    store: SqlAlchemyJobRecordStore
+    store: SqliteJobRecordStore
     provider: VastInstanceProvider
     orchestrator: JobOrchestrator
     sleeps: list[float]
@@ -150,7 +149,7 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
         httpx.Client(transport=httpx.MockTransport(vast.handle)),
         sleeps.append,
     )
-    store = SqlAlchemyJobRecordStore(sessionmaker(engine))
+    store = SqliteJobRecordStore(engine)
     yield Workbench(
         vast,
         engine,
