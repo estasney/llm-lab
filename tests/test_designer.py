@@ -8,12 +8,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from data_designer.config.seed import SamplingStrategy, SeedConfig
-from data_designer.engine.secret_resolver import SecretResolutionError
-from pydantic import SecretStr
 
-from llm_lab.datasets.designer import DataDesignerRunner, HubTokenResolver
+from llm_lab.datasets.designer import DataDesignerRunner
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 from llm_lab.errors import CommandError
+from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings
 from tests.conftest import build_model_config, build_recipe_source
@@ -111,17 +110,10 @@ def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Pa
     assert actual == expected, f"Expected {expected}, got {actual}."
 
 
-def test_hub_token_resolver_gives_the_token_of_the_settings() -> None:
-    actual = HubTokenResolver(SecretStr("hf_secret")).resolve(SecretName.hf_token)
+def test_designer_resolves_the_hub_token_that_a_job_receives(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_LAB_HF_TOKEN", raising=False)
+    monkeypatch.setenv(SecretName.hf_token, "hf_secret")
 
-    assert actual == "hf_secret", f"Expected the token of the settings, got {actual!r}."
+    actual = SettingsSecretSource(Settings()).resolve(SecretName.hf_token)
 
-
-@pytest.mark.parametrize(
-    ("secret", "token"),
-    [(SecretName.hf_token, None), ("OPENAI_API_KEY", SecretStr("hf_secret"))],
-    ids=["no-token", "other-name"],
-)
-def test_hub_token_resolver_leaves_other_secrets_to_the_next_resolver(secret: str, token: SecretStr | None) -> None:
-    with pytest.raises(SecretResolutionError):
-        HubTokenResolver(token).resolve(secret)
+    assert actual == "hf_secret", f"Expected the token from HF_TOKEN, got {actual!r}."

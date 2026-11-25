@@ -2,7 +2,7 @@ from functools import cache, cached_property
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, PositiveFloat, PositiveInt, SecretStr
+from pydantic import AliasChoices, Field, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from sqlalchemy import URL, Engine, create_engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
@@ -22,7 +22,7 @@ def apply_sqlite_pragmas(dbapi_connection: DBAPIConnection, connection_record: C
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LLM_LAB_")
+    model_config = SettingsConfigDict(env_prefix="LLM_LAB_", validate_by_name=True)
 
     job_database_path: Path = Field(
         default=Path(".llm-lab/jobs.sqlite3"),
@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     )
     hf_token: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username=SecretName.hf_token)] = Field(
         default=None,
-        description="Hugging Face access token that a job receives when its manifest lists HF_TOKEN in "
+        validation_alias=AliasChoices("LLM_LAB_HF_TOKEN", SecretName.hf_token),
+        description="Hugging Face access token that a job receives as HF_TOKEN when its manifest lists HF_TOKEN in "
         "secret_environment. Set it with `llm-lab secrets set HF_TOKEN`.",
     )
     vast_api_key: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username=SecretName.vast_api_key)] = (

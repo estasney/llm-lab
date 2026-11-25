@@ -24,3 +24,6 @@ class SettingsSecretSource:
                 raise CommandError(f"The secret {name} is not set. Run `llm-lab secrets set {name}`.")
             case value:
                 raise TypeError(f"the Settings field {name.name!r} has the type {type(value).__name__}")
+
+    def resolve(self, secret: str) -> str:
+        return self.read(SecretName(secret)).get_secret_value()
