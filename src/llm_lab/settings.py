@@ -1,15 +1,16 @@
+import os
 from functools import cache, cached_property
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import AliasChoices, Field, PositiveFloat, PositiveInt, SecretStr
+from pydantic import Field, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from sqlalchemy import URL, Engine, create_engine, event
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from llm_lab.dependencies import Depends
-from llm_lab.keyring_settings import KeyringEntry, KeyringSettingsSource, SecretName
+from llm_lab.keyring_settings import KeyringEntry, SecretName, SecretSettingsSource, read_keyring_password
 
 
 def apply_sqlite_pragmas(dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry) -> None:
@@ -22,7 +23,7 @@ def apply_sqlite_pragmas(dbapi_connection: DBAPIConnection, connection_record: C
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="LLM_LAB_", validate_by_name=True)
+    model_config = SettingsConfigDict(env_prefix="LLM_LAB_")
 
     job_database_path: Path = Field(
         default=Path(".llm-lab/jobs.sqlite3"),
@@ -31,7 +32,6 @@ class Settings(BaseSettings):
     )
     hf_token: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username=SecretName.hf_token)] = Field(
         default=None,
-        validation_alias=AliasChoices("LLM_LAB_HF_TOKEN", SecretName.hf_token),
         description="Hugging Face access token that a job receives as HF_TOKEN when its manifest lists HF_TOKEN in "
         "secret_environment. Set it with `llm-lab secrets set HF_TOKEN`.",
     )
@@ -132,7 +132,12 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return init_settings, env_settings, KeyringSettingsSource(settings_cls)
+        return (
+            init_settings,
+            env_settings,
+            SecretSettingsSource(settings_cls, lambda entry: os.environ.get(entry.username)),
+            SecretSettingsSource(settings_cls, read_keyring_password),
+        )
 
     @cached_property
     def database_engine(self) -> Engine:

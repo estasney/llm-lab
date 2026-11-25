@@ -12,8 +12,8 @@ from data_designer.config.seed import SamplingStrategy, SeedConfig
 from llm_lab.datasets.designer import DataDesignerRunner
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 from llm_lab.errors import CommandError
-from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.keyring_settings import SecretName
+from llm_lab.secrets import SettingsSecretSource
 from llm_lab.settings import Settings
 from tests.conftest import build_model_config, build_recipe_source
 
@@ -96,7 +96,7 @@ def test_create_generates_the_rows_with_the_served_model(
 
 
 def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Path) -> None:
-    seed = {"files": {"kind": "hub", "path": "buckets/lab/seeds/0a1b/*.parquet"}, "sampling_strategy": "shuffle"}
+    seed = {"kind": "hub", "path": "buckets/lab/seeds/0a1b/*.parquet", "sampling_strategy": "shuffle"}
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
 
     actual = build_runner(tmp_path, 8000).build_config(recipe).get_seed_config()

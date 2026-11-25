@@ -1443,9 +1443,28 @@
       "title": "GenerationStrategy",
       "type": "string"
     },
-    "HubSeedFiles": {
+    "HubSeed": {
       "additionalProperties": false,
       "properties": {
+        "sampling_strategy": {
+          "$ref": "#/$defs/SamplingStrategy",
+          "default": "ordered"
+        },
+        "selection_strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRange"
+            },
+            {
+              "$ref": "#/$defs/PartitionBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selection Strategy"
+        },
         "kind": {
           "const": "hub",
           "title": "Kind",
@@ -1462,7 +1481,7 @@
         "kind",
         "path"
       ],
-      "title": "HubSeedFiles",
+      "title": "HubSeed",
       "type": "object"
     },
     "HuggingFaceSeedSource": {
@@ -2423,9 +2442,28 @@
       "title": "LocalFileSeedSource",
       "type": "object"
     },
-    "LocalSeedFiles": {
+    "LocalSeed": {
       "additionalProperties": false,
       "properties": {
+        "sampling_strategy": {
+          "$ref": "#/$defs/SamplingStrategy",
+          "default": "ordered"
+        },
+        "selection_strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRange"
+            },
+            {
+              "$ref": "#/$defs/PartitionBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selection Strategy"
+        },
         "kind": {
           "const": "local",
           "title": "Kind",
@@ -2442,7 +2480,7 @@
         "kind",
         "path"
       ],
-      "title": "LocalSeedFiles",
+      "title": "LocalSeed",
       "type": "object"
     },
     "ManualDistribution": {
@@ -2827,53 +2865,6 @@
         "placement"
       ],
       "title": "RecipeJob",
-      "type": "object"
-    },
-    "RecipeSeed": {
-      "additionalProperties": false,
-      "properties": {
-        "sampling_strategy": {
-          "$ref": "#/$defs/SamplingStrategy",
-          "default": "ordered"
-        },
-        "selection_strategy": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/IndexRange"
-            },
-            {
-              "$ref": "#/$defs/PartitionBlock"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Selection Strategy"
-        },
-        "files": {
-          "discriminator": {
-            "mapping": {
-              "hub": "#/$defs/HubSeedFiles",
-              "local": "#/$defs/LocalSeedFiles"
-            },
-            "propertyName": "kind"
-          },
-          "oneOf": [
-            {
-              "$ref": "#/$defs/LocalSeedFiles"
-            },
-            {
-              "$ref": "#/$defs/HubSeedFiles"
-            }
-          ],
-          "title": "Files"
-        }
-      },
-      "required": [
-        "files"
-      ],
-      "title": "RecipeSeed",
       "type": "object"
     },
     "RemoteValidatorParams": {
@@ -4098,13 +4089,28 @@
     "seed": {
       "anyOf": [
         {
-          "$ref": "#/$defs/RecipeSeed"
+          "discriminator": {
+            "mapping": {
+              "hub": "#/$defs/HubSeed",
+              "local": "#/$defs/LocalSeed"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LocalSeed"
+            },
+            {
+              "$ref": "#/$defs/HubSeed"
+            }
+          ]
         },
         {
           "type": "null"
         }
       ],
-      "default": null
+      "default": null,
+      "title": "Seed"
     },
     "data_designer": {
       "$ref": "#/$defs/DataDesignerConfig"

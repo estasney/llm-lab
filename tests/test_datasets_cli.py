@@ -185,7 +185,7 @@ def test_submit_stores_local_seeds_and_starts_a_job_that_reads_them_from_the_hub
     journal: Journal, tmp_path: Path
 ) -> None:
     recipe_path = tmp_path / "questions.yaml"
-    seed = {"files": {"kind": "local", "path": "questions.parquet"}}
+    seed = {"kind": "local", "path": "questions.parquet"}
     recipe_path.write_text(build_recipe_source([build_model_config("writer")], seed=seed))
     orchestrator = FakeOrchestrator()
     cli = build_app(journal, FakeHub(journal), orchestrator, "ghcr.io/lab/datasets:1")
@@ -197,7 +197,7 @@ def test_submit_stores_local_seeds_and_starts_a_job_that_reads_them_from_the_hub
     job_recipe = parse_recipe(
         gzip.decompress(base64.b64decode(orchestrator.submitted[0].environment["LLM_LAB_RECIPE"])).decode()
     )
-    actual = (exit_code, journal.events, job_recipe.seed and job_recipe.seed.files.path)
+    actual = (exit_code, journal.events, job_recipe.seed and job_recipe.seed.path)
     expected = (
         0,
         ["store seeds of lab/questions", "validate Qwen/Qwen3-8B", "read lab/questions"],

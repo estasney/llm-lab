@@ -4,11 +4,14 @@ from typing import Protocol
 from data_designer.config.config_builder import BuilderConfig, DataDesignerConfigBuilder
 from data_designer.config.errors import InvalidConfigError
 from data_designer.config.models import ModelProvider
+from data_designer.config.seed import SeedConfig
+from data_designer.config.seed_source import HuggingFaceSeedSource
 from data_designer.interface import DataDesigner
 
 from llm_lab.datasets.recipe import Recipe
 from llm_lab.errors import CommandError
-from llm_lab.jobs.secrets import SettingsSecretSource
+from llm_lab.keyring_settings import SecretName
+from llm_lab.secrets import SettingsSecretSource
 from llm_lab.settings import Settings
 
 
@@ -30,7 +33,17 @@ class DataDesignerRunner:
         )
 
     def build_config(self, recipe: Recipe) -> DataDesignerConfigBuilder:
-        seed_config = None if recipe.seed is None else recipe.seed.as_seed_config()
+        seed_config = (
+            None
+            if recipe.seed is None
+            else SeedConfig.model_validate(
+                {
+                    "source": HuggingFaceSeedSource(path=recipe.seed.path, token=SecretName.hf_token),
+                    "sampling_strategy": recipe.seed.sampling_strategy,
+                    "selection_strategy": recipe.seed.selection_strategy,
+                }
+            )
+        )
         data_designer = recipe.data_designer.model_copy(update={"seed_config": seed_config})
         return DataDesignerConfigBuilder.from_config(BuilderConfig(data_designer=data_designer))
 

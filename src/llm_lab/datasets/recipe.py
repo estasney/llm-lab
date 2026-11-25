@@ -1,15 +1,14 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, Literal, Self, assert_never
+from typing import Annotated, Literal, Self
 
 import yaml
 from data_designer.config.data_designer_config import DataDesignerConfig
-from data_designer.config.seed import IndexRange, PartitionBlock, SamplingStrategy, SeedConfig
+from data_designer.config.seed import IndexRange, PartitionBlock, SamplingStrategy
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator
 
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import ExplicitOffer, ResourceRequest
-from llm_lab.keyring_settings import SecretName
 
 
 class RecipeJob(BaseModel):
@@ -25,9 +24,14 @@ class SeedLocation(StrEnum):
     hub = "hub"
 
 
-class LocalSeedFiles(BaseModel):
+class SeedSampling(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    sampling_strategy: SamplingStrategy = SamplingStrategy.ORDERED
+    selection_strategy: IndexRange | PartitionBlock | None = None
+
+
+class LocalSeed(SeedSampling):
     kind: Literal[SeedLocation.local]
     path: str = Field(
         min_length=1,
@@ -36,9 +40,7 @@ class LocalSeedFiles(BaseModel):
     )
 
 
-class HubSeedFiles(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
+class HubSeed(SeedSampling):
     kind: Literal[SeedLocation.hub]
     path: str = Field(
         min_length=1,
@@ -47,50 +49,12 @@ class HubSeedFiles(BaseModel):
     )
 
 
-class SeedSampling(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    sampling_strategy: SamplingStrategy = SamplingStrategy.ORDERED
-    selection_strategy: IndexRange | PartitionBlock | None = None
-
-
-class HubSeed(SeedSampling):
-    files: HubSeedFiles
-
-    def as_seed_config(self) -> SeedConfig:
-        return SeedConfig.model_validate(
-            {
-                "source": {"seed_type": "hf", "path": self.files.path, "token": SecretName.hf_token},
-                "sampling_strategy": self.sampling_strategy,
-                "selection_strategy": self.selection_strategy,
-            }
-        )
-
-
-class RecipeSeed(SeedSampling):
-    files: Annotated[LocalSeedFiles | HubSeedFiles, Field(discriminator="kind")]
-
-    def stored_in(self, files: HubSeedFiles) -> HubSeed:
-        return HubSeed(
-            files=files, sampling_strategy=self.sampling_strategy, selection_strategy=self.selection_strategy
-        )
-
-    def on_hub(self) -> HubSeed:
-        match self.files:
-            case HubSeedFiles() as files:
-                return self.stored_in(files)
-            case LocalSeedFiles():
-                raise CommandError("The recipe names local seed files. Upload them before the recipe runs.")
-            case _:
-                assert_never(self.files)
-
-
 class RecipeFile(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     job: RecipeJob
     vllm_args: tuple[str, ...] = ()
-    seed: RecipeSeed | None = None
+    seed: Annotated[LocalSeed | HubSeed, Field(discriminator="kind")] | None = None
     data_designer: DataDesignerConfig
 
     @field_validator("data_designer")
@@ -115,12 +79,14 @@ class Recipe:
         return (self.data_designer, self.vllm_args, self.seed) == (other.data_designer, other.vllm_args, other.seed)
 
 
-def parse_recipe(source: str) -> Recipe:
-    recipe_file = RecipeFile.model_validate(yaml.safe_load(source))
-    seed = None if recipe_file.seed is None else recipe_file.seed.on_hub()
+def build_recipe(source: str, recipe_file: RecipeFile) -> Recipe:
     model_configs = recipe_file.data_designer.model_configs or []
-    match sorted({config.model for config in model_configs}), sorted({config.provider for config in model_configs}):
-        case [served_model], [provider_name]:
+    models = sorted({config.model for config in model_configs})
+    providers = sorted({config.provider for config in model_configs})
+    match recipe_file.seed, models, providers:
+        case LocalSeed(), _, _:
+            raise CommandError("The recipe names local seed files. Upload them before the recipe runs.")
+        case seed, [served_model], [provider_name]:
             return Recipe(
                 source=source,
                 job=recipe_file.job,
@@ -130,8 +96,12 @@ def parse_recipe(source: str) -> Recipe:
                 served_model=served_model,
                 provider_name=provider_name,
             )
-        case models, providers:
+        case _:
             raise CommandError(
                 "The model configs of a recipe must name one model on one provider. "
                 f"They name the models {models} and the providers {providers}."
             )
+
+
+def parse_recipe(source: str) -> Recipe:
+    return build_recipe(source, RecipeFile.model_validate(yaml.safe_load(source)))

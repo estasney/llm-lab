@@ -9,8 +9,8 @@ from llm_lab.cli.db.deps import DatabaseSessionDep
 from llm_lab.dependencies import Depends
 from llm_lab.jobs.access import JobAccessStore, RsyncDownloader
 from llm_lab.jobs.orchestrator import ArtifactDownloader, InstanceProvider, JobOrchestrator
-from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.jobs.vast import VastInstanceProvider
+from llm_lab.secrets import SettingsSecretSource
 from llm_lab.settings import SettingsDep
 
 

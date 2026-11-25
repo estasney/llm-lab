@@ -7,7 +7,7 @@ import yaml
 from typer.testing import CliRunner
 
 from llm_lab.datasets.hub import HubDataset, HubRepository
-from llm_lab.datasets.recipe import HubSeedFiles, Recipe, SeedLocation, parse_recipe
+from llm_lab.datasets.recipe import Recipe, parse_recipe
 
 
 def build_model_config(alias: str, model: str = "Qwen/Qwen3-8B", provider: str = "vllm") -> dict[str, str]:
@@ -92,10 +92,10 @@ class FakeSeedStore:
     journal: Journal
     patterns: list[Path] = field(default_factory=list[Path])
 
-    def store(self, pattern: Path, dataset: HubDataset) -> HubSeedFiles:
+    def store(self, pattern: Path, dataset: HubDataset) -> str:
         self.journal.events.append(f"store seeds of {dataset.repo_id}")
         self.patterns.append(pattern)
-        return HubSeedFiles(kind=SeedLocation.hub, path=f"buckets/{dataset.namespace}/seeds/0a1b/{pattern.name}")
+        return f"buckets/{dataset.namespace}/seeds/0a1b/{pattern.name}"
 
 
 def run_cli(app: typer.Typer, arguments: list[str]) -> str:
