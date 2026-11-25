@@ -202,7 +202,7 @@ def test_submit_stores_local_seeds_and_starts_a_job_that_reads_them_from_the_hub
     actual = (exit_code, journal.events, job_recipe.seed and job_recipe.seed.path)
     expected = (
         0,
-        ["store seeds of lab/questions", "validate Qwen/Qwen3-8B", "read lab/questions"],
+        ["validate Qwen/Qwen3-8B", "store seeds of lab/questions", "read lab/questions"],
         "buckets/lab/seeds/0a1b/questions.parquet",
     )
     assert actual == expected, f"Expected {expected}, got {actual}."
