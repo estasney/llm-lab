@@ -453,6 +453,267 @@
       "title": "ColumnInequalityConstraint",
       "type": "object"
     },
+    "CountryCode": {
+      "enum": [
+        "AD",
+        "AE",
+        "AF",
+        "AG",
+        "AI",
+        "AL",
+        "AM",
+        "AO",
+        "AQ",
+        "AR",
+        "AS",
+        "AT",
+        "AU",
+        "AW",
+        "AX",
+        "AZ",
+        "BA",
+        "BB",
+        "BD",
+        "BE",
+        "BF",
+        "BG",
+        "BH",
+        "BI",
+        "BJ",
+        "BL",
+        "BM",
+        "BN",
+        "BO",
+        "BQ",
+        "BR",
+        "BS",
+        "BT",
+        "BV",
+        "BW",
+        "BY",
+        "BZ",
+        "CA",
+        "CC",
+        "CD",
+        "CF",
+        "CG",
+        "CH",
+        "CI",
+        "CK",
+        "CL",
+        "CM",
+        "CN",
+        "CO",
+        "CR",
+        "CU",
+        "CV",
+        "CW",
+        "CX",
+        "CY",
+        "CZ",
+        "DE",
+        "DJ",
+        "DK",
+        "DM",
+        "DO",
+        "DZ",
+        "EC",
+        "EE",
+        "EG",
+        "EH",
+        "ER",
+        "ES",
+        "ET",
+        "FI",
+        "FJ",
+        "FK",
+        "FM",
+        "FO",
+        "FR",
+        "GA",
+        "GB",
+        "GD",
+        "GE",
+        "GF",
+        "GG",
+        "GH",
+        "GI",
+        "GL",
+        "GM",
+        "GN",
+        "GP",
+        "GQ",
+        "GR",
+        "GS",
+        "GT",
+        "GU",
+        "GW",
+        "GY",
+        "HK",
+        "HM",
+        "HN",
+        "HR",
+        "HT",
+        "HU",
+        "ID",
+        "IE",
+        "IL",
+        "IM",
+        "IN",
+        "IO",
+        "IQ",
+        "IR",
+        "IS",
+        "IT",
+        "JE",
+        "JM",
+        "JO",
+        "JP",
+        "KE",
+        "KG",
+        "KH",
+        "KI",
+        "KM",
+        "KN",
+        "KP",
+        "KR",
+        "KW",
+        "KY",
+        "KZ",
+        "LA",
+        "LB",
+        "LC",
+        "LI",
+        "LK",
+        "LR",
+        "LS",
+        "LT",
+        "LU",
+        "LV",
+        "LY",
+        "MA",
+        "MC",
+        "MD",
+        "ME",
+        "MF",
+        "MG",
+        "MH",
+        "MK",
+        "ML",
+        "MM",
+        "MN",
+        "MO",
+        "MP",
+        "MQ",
+        "MR",
+        "MS",
+        "MT",
+        "MU",
+        "MV",
+        "MW",
+        "MX",
+        "MY",
+        "MZ",
+        "NA",
+        "NC",
+        "NE",
+        "NF",
+        "NG",
+        "NI",
+        "NL",
+        "NO",
+        "NP",
+        "NR",
+        "NU",
+        "NZ",
+        "OM",
+        "PA",
+        "PE",
+        "PF",
+        "PG",
+        "PH",
+        "PK",
+        "PL",
+        "PM",
+        "PN",
+        "PR",
+        "PS",
+        "PT",
+        "PW",
+        "PY",
+        "QA",
+        "RE",
+        "RO",
+        "RS",
+        "RU",
+        "RW",
+        "SA",
+        "SB",
+        "SC",
+        "SD",
+        "SE",
+        "SG",
+        "SH",
+        "SI",
+        "SJ",
+        "SK",
+        "SL",
+        "SM",
+        "SN",
+        "SO",
+        "SR",
+        "SS",
+        "ST",
+        "SV",
+        "SX",
+        "SY",
+        "SZ",
+        "TC",
+        "TD",
+        "TF",
+        "TG",
+        "TH",
+        "TJ",
+        "TK",
+        "TL",
+        "TM",
+        "TN",
+        "TO",
+        "TR",
+        "TT",
+        "TV",
+        "TW",
+        "TZ",
+        "UA",
+        "UG",
+        "UM",
+        "US",
+        "UY",
+        "UZ",
+        "VA",
+        "VC",
+        "VE",
+        "VG",
+        "VI",
+        "VN",
+        "VU",
+        "WF",
+        "WS",
+        "YE",
+        "YT",
+        "ZA",
+        "ZM",
+        "ZW"
+      ],
+      "type": "string"
+    },
+    "CountryCodes": {
+      "items": {
+        "$ref": "#/$defs/CountryCode"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
     "CustomColumnConfig": {
       "additionalProperties": false,
       "description": "Configuration for custom user-defined column generators.\n\nCustom columns allow users to provide their own generation logic via a callable function\ndecorated with `@custom_column_generator`. Two strategies are supported: cell_by_cell\n(default, row-based) and full_column (batch-based with DataFrame access).\n\nAttributes:\n    generator_function (required): A callable decorated with @custom_column_generator.\n    generation_strategy: \"cell_by_cell\" (row-based) or \"full_column\" (batch-based).\n    generator_params: Optional typed configuration object (Pydantic BaseModel) passed\n        as the second argument to the generator function.\n\nInherited Attributes:\n    name (required): Unique name of the column to be generated.\n    drop: If True, generate this column but remove it from the final dataset.",
@@ -985,6 +1246,20 @@
       "title": "EmbeddingInferenceParams",
       "type": "object"
     },
+    "ExcludedCountries": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "$ref": "#/$defs/CountryCodes",
+          "description": "Countries where the host must not be, as ISO 3166-1 alpha-2 codes."
+        }
+      },
+      "required": [
+        "exclude"
+      ],
+      "title": "ExcludedCountries",
+      "type": "object"
+    },
     "ExplicitOffer": {
       "additionalProperties": false,
       "properties": {
@@ -1406,6 +1681,20 @@
         }
       },
       "title": "ImageInferenceParams",
+      "type": "object"
+    },
+    "IncludedCountries": {
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "$ref": "#/$defs/CountryCodes",
+          "description": "Countries where the host must be, as ISO 3166-1 alpha-2 codes."
+        }
+      },
+      "required": [
+        "include"
+      ],
+      "title": "IncludedCountries",
       "type": "object"
     },
     "IndexRange": {
@@ -2580,12 +2869,106 @@
           "type": "integer"
         },
         "max_dollars_per_hour": {
+          "description": "Ceiling on the total hourly price, which is the compute price plus the storage price for disk_gb.",
           "exclusiveMinimum": 0,
           "title": "Max Dollars Per Hour",
           "type": "number"
         },
+        "max_compute_dollars_per_hour": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling on the hourly price of the machine without storage.",
+          "title": "Max Compute Dollars Per Hour"
+        },
+        "max_storage_dollars_per_gb_month": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling on the storage price in dollars per GB per month.",
+          "title": "Max Storage Dollars Per Gb Month"
+        },
+        "max_download_dollars_per_gb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling on the price of internet download traffic, which Vast.ai bills on top of the hourly price.",
+          "title": "Max Download Dollars Per Gb"
+        },
+        "max_upload_dollars_per_gb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ceiling on the price of internet upload traffic, which Vast.ai bills on top of the hourly price.",
+          "title": "Max Upload Dollars Per Gb"
+        },
+        "countries": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IncludedCountries"
+            },
+            {
+              "$ref": "#/$defs/ExcludedCountries"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Countries to include or to exclude. Without it, a host can be in any country.",
+          "title": "Countries"
+        },
+        "datacenter_only": {
+          "default": false,
+          "description": "Rent only hosts that Vast.ai lists as datacenters.",
+          "title": "Datacenter Only",
+          "type": "boolean"
+        },
+        "min_duration_hours": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Minimum time in hours that the host must stay available for rent.",
+          "title": "Min Duration Hours"
+        },
         "min_cuda": {
           "default": 13.0,
+          "description": "Minimum CUDA version that the driver of the host must support.",
           "exclusiveMinimum": 0,
           "title": "Min Cuda",
           "type": "number"

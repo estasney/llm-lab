@@ -643,6 +643,55 @@ def test_offer_query_filters_on_cuda_13_unless_the_request_sets_another_floor() 
     assert actual == expected, f"Expected the CUDA filters {expected}, got {actual}."
 
 
+@pytest.mark.parametrize(
+    ("update", "expected"),
+    [
+        ({}, {}),
+        (
+            {
+                "max_compute_dollars_per_hour": 0.4,
+                "max_storage_dollars_per_gb_month": 0.2,
+                "max_download_dollars_per_gb": 0.005,
+                "max_upload_dollars_per_gb": 0.01,
+            },
+            {
+                "dph_base": {"lte": 0.4},
+                "storage_cost": {"lte": 0.2},
+                "inet_down_cost": {"lte": 0.005},
+                "inet_up_cost": {"lte": 0.01},
+            },
+        ),
+        ({"countries": {"include": ["US", "CA"]}}, {"geolocation": {"in": ["US", "CA"]}}),
+        ({"countries": {"exclude": ["CN"]}}, {"geolocation": {"notin": ["CN"]}}),
+        ({"datacenter_only": True}, {"datacenter": {"eq": True}}),
+        ({"min_duration_hours": 48}, {"duration": {"gte": 172800}}),
+    ],
+    ids=["no-filters", "price-parts", "include-countries", "exclude-countries", "datacenter-only", "min-duration"],
+)
+def test_offer_query_adds_a_clause_for_each_optional_filter_of_the_request(
+    update: dict[str, object], expected: dict[str, object]
+) -> None:
+    fields = {"kind": "resources", "gpu_name": "RTX 4090", "gpu_count": 1, "max_dollars_per_hour": 1.0}
+    unfiltered = build_offer_query(ResourceRequest.model_validate(fields), 40, 10)
+
+    query = build_offer_query(ResourceRequest.model_validate(fields | update), 40, 10)
+
+    actual = {key: value for key, value in query.items() if unfiltered.get(key) != value}
+    assert actual == expected, f"Expected the added clauses {expected}, got {actual}."
+
+
+@pytest.mark.parametrize(
+    "countries",
+    [{"include": ["US"], "exclude": ["CN"]}, {"include": ["ZZ"]}, {"include": ["USA"]}, {"exclude": []}],
+    ids=["include-and-exclude", "unassigned-code", "three-letter-code", "empty-set"],
+)
+def test_resource_request_rejects_an_invalid_country_filter(countries: dict[str, list[str]]) -> None:
+    fields = {"kind": "resources", "gpu_name": "RTX 4090", "gpu_count": 1, "max_dollars_per_hour": 1.0}
+
+    with pytest.raises(ValidationError):
+        ResourceRequest.model_validate(fields | {"countries": countries})
+
+
 def build_spec_with_artifacts() -> JobSpec:
     return build_spec().model_copy(update={"artifacts_directory": "/workspace/artifacts"})
 
