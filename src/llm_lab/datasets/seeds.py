@@ -3,13 +3,11 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, assert_never
+from typing import Protocol
 
-import yaml
 from huggingface_hub import HfApi
 
 from llm_lab.datasets.hub import HubDataset
-from llm_lab.datasets.recipe import HubSeed, LocalSeed, Recipe, RecipeFile, SeedLocation, build_recipe
 from llm_lab.errors import CommandError
 from llm_lab.settings import Settings
 
@@ -55,23 +53,3 @@ class HuggingFaceSeedStore:
         bucket_id = f"{dataset.namespace}/{self.bucket_name}"
         self.upload(folder, bucket_id)
         return f"buckets/{bucket_id}/{folder.name}/{pattern.name}"
-
-
-def resolve_recipe(source: str, directory: Path, dataset: HubDataset, store: SeedStore) -> Recipe:
-    document = yaml.safe_load(source)
-    recipe_file = RecipeFile.model_validate(document)
-    match recipe_file.seed:
-        case LocalSeed() as local:
-            seed = HubSeed(
-                kind=SeedLocation.hub,
-                path=store.store(directory / local.path, dataset),
-                sampling_strategy=local.sampling_strategy,
-                selection_strategy=local.selection_strategy,
-            )
-            document["seed"] = seed.model_dump(mode="json")
-            stored_source = yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
-            return build_recipe(stored_source, recipe_file.model_copy(update={"seed": seed}))
-        case HubSeed() | None:
-            return build_recipe(source, recipe_file)
-        case _:
-            assert_never(recipe_file.seed)

@@ -7,6 +7,7 @@ import yaml
 from typer.testing import CliRunner
 
 from llm_lab.datasets.hub import HubDataset, HubRepository
+from llm_lab.datasets.job import JobRecipe, prepare_job_recipe
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 
 
@@ -127,6 +128,11 @@ def recipe_source() -> str:
 @pytest.fixture
 def recipe(recipe_source: str) -> Recipe:
     return parse_recipe(recipe_source)
+
+
+@pytest.fixture
+def job_recipe(recipe: Recipe) -> JobRecipe:
+    return prepare_job_recipe(recipe, HubDataset(namespace="lab", name="sentences"), FakeSeedStore(Journal()))
 
 
 @pytest.fixture

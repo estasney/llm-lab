@@ -35,8 +35,8 @@ class LocalSeed(SeedSampling):
     kind: Literal[SeedLocation.local]
     path: str = Field(
         min_length=1,
-        description="Seed file, or a wildcard such as seeds/*.parquet, relative to the folder of the recipe file. "
-        "llm-lab uploads the files to a Hub bucket before a run.",
+        description="Seed file, or a wildcard such as seeds/*.parquet, relative to the current folder. "
+        "A job reads a copy that llm-lab uploads to a Hub bucket.",
     )
 
 
@@ -70,7 +70,7 @@ class Recipe:
     source: str
     job: RecipeJob
     vllm_args: tuple[str, ...]
-    seed: HubSeed | None
+    seed: LocalSeed | HubSeed | None
     data_designer: DataDesignerConfig
     served_model: str
     provider_name: str
@@ -79,29 +79,22 @@ class Recipe:
         return (self.data_designer, self.vllm_args, self.seed) == (other.data_designer, other.vllm_args, other.seed)
 
 
-def build_recipe(source: str, recipe_file: RecipeFile) -> Recipe:
+def parse_recipe(source: str) -> Recipe:
+    recipe_file = RecipeFile.model_validate(yaml.safe_load(source))
     model_configs = recipe_file.data_designer.model_configs or []
-    models = sorted({config.model for config in model_configs})
-    providers = sorted({config.provider for config in model_configs})
-    match recipe_file.seed, models, providers:
-        case LocalSeed(), _, _:
-            raise CommandError("The recipe names local seed files. Upload them before the recipe runs.")
-        case seed, [served_model], [provider_name]:
+    match sorted({config.model for config in model_configs}), sorted({config.provider for config in model_configs}):
+        case [served_model], [provider_name]:
             return Recipe(
                 source=source,
                 job=recipe_file.job,
                 vllm_args=recipe_file.vllm_args,
-                seed=seed,
+                seed=recipe_file.seed,
                 data_designer=recipe_file.data_designer,
                 served_model=served_model,
                 provider_name=provider_name,
             )
-        case _:
+        case models, providers:
             raise CommandError(
                 "The model configs of a recipe must name one model on one provider. "
                 f"They name the models {models} and the providers {providers}."
             )
-
-
-def parse_recipe(source: str) -> Recipe:
-    return build_recipe(source, RecipeFile.model_validate(yaml.safe_load(source)))

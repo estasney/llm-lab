@@ -19,9 +19,8 @@ from llm_lab.datasets.hub import (
     StoredDataset,
     parse_hub_dataset,
 )
-from llm_lab.datasets.job import build_dataset_job
+from llm_lab.datasets.job import build_dataset_job, prepare_job_recipe
 from llm_lab.datasets.recipe import Recipe, RecipeFile, parse_recipe
-from llm_lab.datasets.seeds import SeedStore, resolve_recipe
 from llm_lab.errors import CommandError
 from llm_lab.settings import SettingsDep
 
@@ -35,9 +34,9 @@ type DatasetOption = Annotated[
 type RowsOption = Annotated[int, typer.Option(min=1, help="Number of rows to generate.")]
 
 
-def load_recipe(path: Path, dataset: HubDataset, seeds: SeedStore) -> Recipe:
+def load_recipe(path: Path) -> Recipe:
     with reading_yaml_file(path, "recipe"):
-        return resolve_recipe(path.read_text(), path.parent, dataset, seeds)
+        return parse_recipe(path.read_text())
 
 
 def check_dataset(recipe: Recipe, dataset: HubDataset, designer: DatasetDesigner, hub: DatasetHub) -> HubRepository:
@@ -72,7 +71,7 @@ def submit_dataset(
 ) -> None:
     if settings.datasets_image is None:
         raise CommandError("The datasets image is not set. Set the environment variable LLM_LAB_DATASETS_IMAGE.")
-    recipe = load_recipe(recipe_path, dataset, seeds)
+    recipe = prepare_job_recipe(load_recipe(recipe_path), dataset, seeds)
     check_dataset(recipe, dataset, designer, hub)
     report(orchestrator.submit(build_dataset_job(recipe, dataset, rows, settings.datasets_image)))
 
@@ -85,9 +84,8 @@ def create_dataset(
     server: ModelServerDep,
     designer: DatasetDesignerDep,
     hub: DatasetHubDep,
-    seeds: SeedStoreDep,
 ) -> None:
-    recipe = load_recipe(recipe_path, dataset, seeds)
+    recipe = load_recipe(recipe_path)
     repository = check_dataset(recipe, dataset, designer, hub)
     with server.serve(recipe):
         directory = designer.create(recipe, dataset.name, rows)

@@ -1,14 +1,14 @@
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, assert_never
 
 from data_designer.config.config_builder import BuilderConfig, DataDesignerConfigBuilder
 from data_designer.config.errors import InvalidConfigError
 from data_designer.config.models import ModelProvider
 from data_designer.config.seed import SeedConfig
-from data_designer.config.seed_source import HuggingFaceSeedSource
+from data_designer.config.seed_source import HuggingFaceSeedSource, LocalFileSeedSource
 from data_designer.interface import DataDesigner
 
-from llm_lab.datasets.recipe import Recipe
+from llm_lab.datasets.recipe import HubSeed, LocalSeed, Recipe
 from llm_lab.errors import CommandError
 from llm_lab.keyring_settings import SecretName
 from llm_lab.secrets import SettingsSecretSource
@@ -19,6 +19,23 @@ class DatasetDesigner(Protocol):
     def validate(self, recipe: Recipe) -> None: ...
 
     def create(self, recipe: Recipe, name: str, rows: int) -> Path: ...
+
+
+def build_seed_config(seed: LocalSeed | HubSeed) -> SeedConfig:
+    match seed:
+        case LocalSeed(path=path):
+            source = LocalFileSeedSource(path=path)
+        case HubSeed(path=path):
+            source = HuggingFaceSeedSource(path=path, token=SecretName.hf_token)
+        case _:
+            assert_never(seed)
+    return SeedConfig.model_validate(
+        {
+            "source": source,
+            "sampling_strategy": seed.sampling_strategy,
+            "selection_strategy": seed.selection_strategy,
+        }
+    )
 
 
 class DataDesignerRunner:
@@ -33,17 +50,7 @@ class DataDesignerRunner:
         )
 
     def build_config(self, recipe: Recipe) -> DataDesignerConfigBuilder:
-        seed_config = (
-            None
-            if recipe.seed is None
-            else SeedConfig.model_validate(
-                {
-                    "source": HuggingFaceSeedSource(path=recipe.seed.path, token=SecretName.hf_token),
-                    "sampling_strategy": recipe.seed.sampling_strategy,
-                    "selection_strategy": recipe.seed.selection_strategy,
-                }
-            )
-        )
+        seed_config = None if recipe.seed is None else build_seed_config(recipe.seed)
         data_designer = recipe.data_designer.model_copy(update={"seed_config": seed_config})
         return DataDesignerConfigBuilder.from_config(BuilderConfig(data_designer=data_designer))
 

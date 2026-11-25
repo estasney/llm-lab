@@ -5,8 +5,9 @@ import pytest
 from data_designer.config.seed import SamplingStrategy
 
 from llm_lab.datasets.hub import HubDataset
+from llm_lab.datasets.job import prepare_job_recipe
 from llm_lab.datasets.recipe import HubSeed, SeedLocation, parse_recipe
-from llm_lab.datasets.seeds import read_seed_folder, resolve_recipe
+from llm_lab.datasets.seeds import read_seed_folder
 from llm_lab.errors import CommandError
 from tests.conftest import FakeSeedStore, Journal, build_model_config, build_recipe_source
 
@@ -18,18 +19,18 @@ def write_seed_files(directory: Path, questions: dict[str, str]) -> Path:
     return directory
 
 
-def test_recipe_with_local_seeds_runs_from_the_files_that_the_store_uploads(journal: Journal, tmp_path: Path) -> None:
+def test_job_recipe_reads_the_local_seeds_that_the_store_uploads(journal: Journal) -> None:
     store = FakeSeedStore(journal)
     seed = {"kind": "local", "path": "seeds/*.parquet", "sampling_strategy": "shuffle"}
-    source = build_recipe_source([build_model_config("writer")], seed=seed)
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
 
-    recipe = resolve_recipe(source, tmp_path, HubDataset(namespace="lab", name="questions"), store)
+    job_recipe = prepare_job_recipe(recipe, HubDataset(namespace="lab", name="questions"), store)
 
     expected_seed = HubSeed(
         kind=SeedLocation.hub, path="buckets/lab/seeds/0a1b/*.parquet", sampling_strategy=SamplingStrategy.SHUFFLE
     )
-    actual = (store.patterns, recipe.seed, parse_recipe(recipe.source) == recipe)
-    expected = ([tmp_path / "seeds" / "*.parquet"], expected_seed, True)
+    actual = (store.patterns, job_recipe.seed, parse_recipe(job_recipe.source).seed)
+    expected = ([Path("seeds/*.parquet")], expected_seed, expected_seed)
     assert actual == expected, f"Expected {expected}, got {actual}."
 
 
@@ -38,23 +39,25 @@ def test_recipe_with_local_seeds_runs_from_the_files_that_the_store_uploads(jour
     [None, {"kind": "hub", "path": "datasets/lab/questions/data/*.parquet"}],
     ids=["no-seed", "hub-seed"],
 )
-def test_recipe_without_local_seeds_runs_as_written(
-    journal: Journal, tmp_path: Path, seed: dict[str, str] | None
-) -> None:
-    source = build_recipe_source([build_model_config("writer")], seed=seed)
+def test_job_recipe_without_local_seeds_is_the_recipe_as_written(journal: Journal, seed: dict[str, str] | None) -> None:
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
 
-    recipe = resolve_recipe(source, tmp_path, HubDataset(namespace="lab", name="questions"), FakeSeedStore(journal))
+    job_recipe = prepare_job_recipe(recipe, HubDataset(namespace="lab", name="questions"), FakeSeedStore(journal))
 
-    assert (recipe.source, journal.events) == (source, []), f"Got {recipe.source!r} and {journal.events}."
+    assert (job_recipe.source, job_recipe.seed, journal.events) == (recipe.source, recipe.seed, []), (
+        f"Got {job_recipe}."
+    )
 
 
-def test_stored_recipe_keeps_the_data_designer_section_of_the_written_recipe(journal: Journal, tmp_path: Path) -> None:
+def test_job_recipe_keeps_the_data_designer_section_of_the_written_recipe(journal: Journal) -> None:
     written = (Path(__file__).parent.parent / "recipes" / "concise-dpo.yaml").read_text()
-    source = f"{written}\nseed:\n  kind: local\n  path: questions.parquet\n"
+    recipe = parse_recipe(f"{written}\nseed:\n  kind: local\n  path: questions.parquet\n")
 
-    recipe = resolve_recipe(source, tmp_path, HubDataset(namespace="lab", name="answers"), FakeSeedStore(journal))
+    job_recipe = prepare_job_recipe(recipe, HubDataset(namespace="lab", name="answers"), FakeSeedStore(journal))
 
-    assert recipe.data_designer == parse_recipe(written).data_designer, "Expected data_designer to stay as written."
+    assert parse_recipe(job_recipe.source).data_designer == parse_recipe(written).data_designer, (
+        "Expected data_designer to stay as written."
+    )
 
 
 def test_seed_folder_holds_every_file_that_the_pattern_matches(tmp_path: Path) -> None:

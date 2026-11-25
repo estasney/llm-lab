@@ -13,7 +13,7 @@ from llm_lab.cli.datasets.deps import get_dataset_designer, get_dataset_hub, get
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs.deps import get_job_orchestrator
 from llm_lab.datasets.hub import HubDataset, StoredDataset
-from llm_lab.datasets.job import build_dataset_job
+from llm_lab.datasets.job import JobRecipe, build_dataset_job
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 from llm_lab.datasets.repository import RepositoryFilePaths, RepositoryMetadata
 from llm_lab.jobs.protocol import JobRecord, JobSpec, Running
@@ -166,7 +166,7 @@ def test_command_reports_each_invalid_section_of_a_recipe(journal: Journal, tmp_
 
 
 def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
-    journal: Journal, recipe_path: Path, recipe: Recipe
+    journal: Journal, recipe_path: Path, job_recipe: JobRecipe
 ) -> None:
     orchestrator = FakeOrchestrator()
     cli = build_app(journal, FakeHub(journal), orchestrator, "ghcr.io/lab/datasets:1")
@@ -175,7 +175,9 @@ def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
         cli, ["datasets", "submit", str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"]
     )
 
-    expected = [build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")]
+    expected = [
+        build_dataset_job(job_recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
+    ]
     assert orchestrator.submitted == expected, f"Expected {expected}, got {orchestrator.submitted}."
     assert (exit_code, JobRecord.model_validate_json(output).status.condition) == (0, "running"), f"Got {output!r}."
     assert journal.events == ["validate Qwen/Qwen3-8B", "read lab/sentences"], f"Got {journal.events}."
@@ -217,8 +219,8 @@ def test_submit_requires_the_datasets_image(journal: Journal, recipe_path: Path)
     assert orchestrator.submitted == [], f"Expected no job, got {orchestrator.submitted}."
 
 
-def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: Recipe) -> None:
-    spec = build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
+def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(job_recipe: JobRecipe) -> None:
+    spec = build_dataset_job(job_recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
 
     decoded = gzip.decompress(base64.b64decode(spec.environment["LLM_LAB_RECIPE"])).decode()
     actual = (spec.name, spec.image, spec.command, set(spec.environment), spec.secret_environment, spec.disk_gb)
@@ -231,8 +233,10 @@ def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: R
         120,
     )
     assert actual == expected, f"Expected {expected}, got {actual}."
-    assert (spec.ttl_seconds_after_finished, spec.placement) == (600, recipe.job.placement), "Expected the recipe job."
-    assert decoded == recipe.source, "Expected the job to carry the recipe file unchanged."
+    assert (spec.ttl_seconds_after_finished, spec.placement) == (600, job_recipe.job.placement), (
+        "Expected the job_recipe job."
+    )
+    assert decoded == job_recipe.source, "Expected the job to carry the job_recipe file unchanged."
     assert spec.artifacts_directory == spec.environment["LLM_LAB_ARTIFACTS_DIR"], (
         "Expected destroy to download the directory where Data Designer writes."
     )

@@ -2470,7 +2470,7 @@
           "type": "string"
         },
         "path": {
-          "description": "Seed file, or a wildcard such as seeds/*.parquet, relative to the folder of the recipe file. llm-lab uploads the files to a Hub bucket before a run.",
+          "description": "Seed file, or a wildcard such as seeds/*.parquet, relative to the current folder. A job reads a copy that llm-lab uploads to a Hub bucket.",
           "minLength": 1,
           "title": "Path",
           "type": "string"

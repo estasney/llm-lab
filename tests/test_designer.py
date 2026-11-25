@@ -117,3 +117,19 @@ def test_designer_resolves_the_hub_token_that_a_job_receives(monkeypatch: pytest
     actual = SettingsSecretSource(Settings()).resolve(SecretName.hf_token)
 
     assert actual == "hf_secret", f"Expected the token from HF_TOKEN, got {actual!r}."
+
+
+def test_create_generates_one_row_for_each_local_seed_row(tmp_path: Path, chat_server: ChatServer) -> None:
+    seeds = tmp_path / "topics.parquet"
+    pd.DataFrame({"season": ["winter", "summer"]}).to_parquet(seeds)
+    source = build_recipe_source(
+        [build_model_config("writer")],
+        prompt="Write one sentence about {{ topic }} in {{ season }}.",
+        seed={"kind": "local", "path": str(seeds)},
+    )
+
+    directory = build_runner(tmp_path, chat_server.port).create(parse_recipe(source), "sentences", 4)
+
+    dataset = pd.read_parquet(directory / "parquet-files")
+    actual = dataset["season"].tolist()
+    assert actual == ["winter", "summer", "winter", "summer"], f"Expected the seed rows in order, got {actual}."

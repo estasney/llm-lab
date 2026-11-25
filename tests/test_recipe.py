@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from llm_lab.datasets.recipe import HubSeed, Recipe, RecipeJob, SeedLocation, parse_recipe
+from llm_lab.datasets.recipe import HubSeed, LocalSeed, Recipe, RecipeJob, SeedLocation, parse_recipe
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import PlacementKind, ResourceRequest
 from tests.conftest import build_model_config, build_recipe_source
@@ -54,11 +54,13 @@ def test_recipe_runs_with_the_hub_seed_that_it_names() -> None:
     assert recipe.seed == expected, f"Expected {expected}, got {recipe.seed}."
 
 
-def test_recipe_with_local_seeds_does_not_run_before_they_are_uploaded() -> None:
-    source = build_recipe_source([build_model_config("writer")], seed={"kind": "local", "path": "a.parquet"})
+def test_recipe_reads_local_seeds_from_the_path_that_it_names() -> None:
+    recipe = parse_recipe(
+        build_recipe_source([build_model_config("writer")], seed={"kind": "local", "path": "a.parquet"})
+    )
 
-    with pytest.raises(CommandError, match="Upload them before the recipe runs"):
-        parse_recipe(source)
+    expected = LocalSeed(kind=SeedLocation.local, path="a.parquet")
+    assert recipe.seed == expected, f"Expected {expected}, got {recipe.seed}."
 
 
 @pytest.mark.parametrize(
