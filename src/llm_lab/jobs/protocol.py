@@ -4,7 +4,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal, Self, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
+import pycountry
+from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, WithJsonSchema, model_validator
 from pydantic_extra_types.country import CountryAlpha2
 
 from llm_lab.keyring_settings import SecretName
@@ -25,7 +26,11 @@ class JobCondition(StrEnum):
 
 type JobName = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")]
 type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
-type CountryCodes = Annotated[tuple[CountryAlpha2, ...], Field(min_length=1)]
+type CountryCode = Annotated[
+    CountryAlpha2,
+    WithJsonSchema({"type": "string", "enum": sorted(country.alpha_2 for country in pycountry.countries)}),
+]
+type CountryCodes = Annotated[tuple[CountryCode, ...], Field(min_length=1)]
 
 
 class IncludedCountries(BaseModel):
