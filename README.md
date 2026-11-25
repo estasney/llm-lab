@@ -47,7 +47,13 @@ To build the image yourself, run this from the repository root:
 docker build -f docker/datasets/Dockerfile -t <registry>/llm-lab-datasets:<tag> .
 ```
 
-The build args `PYTHON_IMAGE`, `UV_IMAGE` and `VLLM_VERSION` set the base image, the uv image and the vLLM version.
+The build args:
+
+- `CUDA_IMAGE`: the base image. It is a CUDA devel image, because vLLM compiles GPU kernels at runtime with `nvcc`.
+- `UV_IMAGE`: the image that supplies uv.
+- `PYTHON_VERSION`: the Python version, which uv installs.
+- `VLLM_VERSION`: the vLLM version.
+- `TORCH_BACKEND`: the PyTorch build. It must match the CUDA version of `CUDA_IMAGE`. The vLLM Dockerfile of each version names that CUDA version.
 
 ## Commands
 
