@@ -92,7 +92,7 @@ def build_instance_request(
     script = "\n".join(
         [
             "if command -v sshd >/dev/null 2>&1; then",
-            "mkdir -p -m 700 /run/sshd",
+            "mkdir -p -m 700 /run/sshd /root/.ssh",
             "mkdir -p /etc/profile.d",
             "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /run/sshd/llm-lab-authorized-keys",
             "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)",
