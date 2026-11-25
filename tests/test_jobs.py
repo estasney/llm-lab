@@ -682,8 +682,8 @@ def test_offer_query_adds_a_clause_for_each_optional_filter_of_the_request(
 
 @pytest.mark.parametrize(
     "countries",
-    [{"include": ["US"], "exclude": ["CN"]}, {"include": ["us"]}, {"include": ["USA"]}, {"exclude": []}],
-    ids=["include-and-exclude", "lowercase-code", "three-letter-code", "empty-set"],
+    [{"include": ["US"], "exclude": ["CN"]}, {"include": ["ZZ"]}, {"include": ["USA"]}, {"exclude": []}],
+    ids=["include-and-exclude", "unassigned-code", "three-letter-code", "empty-set"],
 )
 def test_resource_request_rejects_an_invalid_country_filter(countries: dict[str, list[str]]) -> None:
     fields = {"kind": "resources", "gpu_name": "RTX 4090", "gpu_count": 1, "max_dollars_per_hour": 1.0}

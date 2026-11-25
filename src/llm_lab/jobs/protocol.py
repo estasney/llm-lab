@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Annotated, Literal, Self, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, model_validator
+from pydantic_extra_types.country import CountryAlpha2
 
 from llm_lab.keyring_settings import SecretName
 
@@ -24,20 +25,19 @@ class JobCondition(StrEnum):
 
 type JobName = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")]
 type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
-type CountryCode = Annotated[str, Field(pattern=r"^[A-Z]{2}$")]
-type CountryCodes = Annotated[tuple[CountryCode, ...], Field(min_length=1)]
+type CountryCodes = Annotated[tuple[CountryAlpha2, ...], Field(min_length=1)]
 
 
 class IncludedCountries(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    include: CountryCodes
+    include: CountryCodes = Field(description="Countries where the host must be, as ISO 3166-1 alpha-2 codes.")
 
 
 class ExcludedCountries(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    exclude: CountryCodes
+    exclude: CountryCodes = Field(description="Countries where the host must not be, as ISO 3166-1 alpha-2 codes.")
 
 
 class ResourceRequest(BaseModel):
@@ -46,15 +46,33 @@ class ResourceRequest(BaseModel):
     kind: Literal[PlacementKind.resources]
     gpu_name: Annotated[str, Field(min_length=1)]
     gpu_count: PositiveInt
-    max_dollars_per_hour: PositiveFloat
-    max_compute_dollars_per_hour: PositiveFloat | None = None
-    max_storage_dollars_per_gb_month: PositiveFloat | None = None
-    max_download_dollars_per_gb: PositiveFloat | None = None
-    max_upload_dollars_per_gb: PositiveFloat | None = None
-    countries: IncludedCountries | ExcludedCountries | None = None
-    datacenter_only: bool = False
-    min_duration_hours: PositiveFloat | None = None
-    min_cuda: PositiveFloat = 13.0
+    max_dollars_per_hour: PositiveFloat = Field(
+        description="Ceiling on the total hourly price, which is the compute price plus the storage price for disk_gb."
+    )
+    max_compute_dollars_per_hour: PositiveFloat | None = Field(
+        default=None, description="Ceiling on the hourly price of the machine without storage."
+    )
+    max_storage_dollars_per_gb_month: PositiveFloat | None = Field(
+        default=None, description="Ceiling on the storage price in dollars per GB per month."
+    )
+    max_download_dollars_per_gb: PositiveFloat | None = Field(
+        default=None,
+        description="Ceiling on the price of internet download traffic, which Vast.ai bills on top of the hourly price.",
+    )
+    max_upload_dollars_per_gb: PositiveFloat | None = Field(
+        default=None,
+        description="Ceiling on the price of internet upload traffic, which Vast.ai bills on top of the hourly price.",
+    )
+    countries: IncludedCountries | ExcludedCountries | None = Field(
+        default=None, description="Countries to include or to exclude. Without it, a host can be in any country."
+    )
+    datacenter_only: bool = Field(default=False, description="Rent only hosts that Vast.ai lists as datacenters.")
+    min_duration_hours: PositiveFloat | None = Field(
+        default=None, description="Minimum time in hours that the host must stay available for rent."
+    )
+    min_cuda: PositiveFloat = Field(
+        default=13.0, description="Minimum CUDA version that the driver of the host must support."
+    )
 
 
 class ExplicitOffer(BaseModel):

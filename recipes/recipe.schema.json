@@ -453,13 +453,10 @@
       "title": "ColumnInequalityConstraint",
       "type": "object"
     },
-    "CountryCode": {
-      "pattern": "^[A-Z]{2}$",
-      "type": "string"
-    },
     "CountryCodes": {
       "items": {
-        "$ref": "#/$defs/CountryCode"
+        "pattern": "^\\w{2}$",
+        "type": "string"
       },
       "minItems": 1,
       "type": "array"
@@ -1000,7 +997,8 @@
       "additionalProperties": false,
       "properties": {
         "exclude": {
-          "$ref": "#/$defs/CountryCodes"
+          "$ref": "#/$defs/CountryCodes",
+          "description": "Countries where the host must not be, as ISO 3166-1 alpha-2 codes."
         }
       },
       "required": [
@@ -1436,7 +1434,8 @@
       "additionalProperties": false,
       "properties": {
         "include": {
-          "$ref": "#/$defs/CountryCodes"
+          "$ref": "#/$defs/CountryCodes",
+          "description": "Countries where the host must be, as ISO 3166-1 alpha-2 codes."
         }
       },
       "required": [
@@ -2617,6 +2616,7 @@
           "type": "integer"
         },
         "max_dollars_per_hour": {
+          "description": "Ceiling on the total hourly price, which is the compute price plus the storage price for disk_gb.",
           "exclusiveMinimum": 0,
           "title": "Max Dollars Per Hour",
           "type": "number"
@@ -2632,6 +2632,7 @@
             }
           ],
           "default": null,
+          "description": "Ceiling on the hourly price of the machine without storage.",
           "title": "Max Compute Dollars Per Hour"
         },
         "max_storage_dollars_per_gb_month": {
@@ -2645,6 +2646,7 @@
             }
           ],
           "default": null,
+          "description": "Ceiling on the storage price in dollars per GB per month.",
           "title": "Max Storage Dollars Per Gb Month"
         },
         "max_download_dollars_per_gb": {
@@ -2658,6 +2660,7 @@
             }
           ],
           "default": null,
+          "description": "Ceiling on the price of internet download traffic, which Vast.ai bills on top of the hourly price.",
           "title": "Max Download Dollars Per Gb"
         },
         "max_upload_dollars_per_gb": {
@@ -2671,6 +2674,7 @@
             }
           ],
           "default": null,
+          "description": "Ceiling on the price of internet upload traffic, which Vast.ai bills on top of the hourly price.",
           "title": "Max Upload Dollars Per Gb"
         },
         "countries": {
@@ -2686,10 +2690,12 @@
             }
           ],
           "default": null,
+          "description": "Countries to include or to exclude. Without it, a host can be in any country.",
           "title": "Countries"
         },
         "datacenter_only": {
           "default": false,
+          "description": "Rent only hosts that Vast.ai lists as datacenters.",
           "title": "Datacenter Only",
           "type": "boolean"
         },
@@ -2704,10 +2710,12 @@
             }
           ],
           "default": null,
+          "description": "Minimum time in hours that the host must stay available for rent.",
           "title": "Min Duration Hours"
         },
         "min_cuda": {
           "default": 13.0,
+          "description": "Minimum CUDA version that the driver of the host must support.",
           "exclusiveMinimum": 0,
           "title": "Min Cuda",
           "type": "number"
