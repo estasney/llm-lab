@@ -39,6 +39,7 @@ def prepare_job_recipe(recipe: Recipe, dataset: HubDataset, seeds: SeedStore) ->
         job=recipe.job,
         vllm_args=recipe.vllm_args,
         seed=seed,
+        rows_per_batch=recipe.rows_per_batch,
         data_designer=recipe.data_designer,
         served_model=recipe.served_model,
         provider_name=recipe.provider_name,

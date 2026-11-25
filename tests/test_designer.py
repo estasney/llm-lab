@@ -95,6 +95,15 @@ def test_create_generates_the_rows_with_the_served_model(
     assert actual == expected, f"Expected {expected}, got {actual}."
 
 
+def test_create_writes_one_file_for_each_batch_of_the_recipe(tmp_path: Path, chat_server: ChatServer) -> None:
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], rows_per_batch=2))
+
+    directory = build_runner(tmp_path, chat_server.port).create(recipe, "sentences", 4)
+
+    actual = len(list((directory / "parquet-files").glob("*.parquet")))
+    assert actual == 2, f"Expected two batch files for four rows, got {actual}."
+
+
 def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Path) -> None:
     seed = {"kind": "hub", "path": "buckets/lab/seeds/0a1b/*.parquet", "sampling_strategy": "shuffle"}
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
