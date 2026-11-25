@@ -37,20 +37,6 @@ data_designer:
             enable_thinking: false
 
   columns:
-    - name: prompt_type
-      column_type: sampler
-      sampler_type: category
-      params:
-        values:
-          - factual question
-          - how-to question
-          - code question
-          - debugging request
-          - comparison between two options
-          - request for advice
-          - request for an explanation of a concept
-          - casual conversation
-
     - name: domain
       column_type: sampler
       sampler_type: category
@@ -67,15 +53,72 @@ data_designer:
           - history
           - writing and grammar
 
+    - name: prompt_type
+      column_type: sampler
+      sampler_type: subcategory
+      params:
+        category: domain
+        values:
+          software engineering: &technical_prompt_types
+            - factual question
+            - how-to question
+            - code question
+            - debugging request
+            - comparison between two options
+            - request for advice
+            - request for an explanation of a concept
+            - casual conversation
+          data science: *technical_prompt_types
+          cooking: &practical_prompt_types
+            - factual question
+            - how-to question
+            - request to troubleshoot a problem
+            - comparison between two options
+            - request for advice
+            - request for an explanation of a concept
+            - casual conversation
+          personal finance: *practical_prompt_types
+          health and fitness: *practical_prompt_types
+          travel: *practical_prompt_types
+          home repair: *practical_prompt_types
+          science: &academic_prompt_types
+            - factual question
+            - comparison between two options
+            - request for an explanation of a concept
+            - casual conversation
+          history: *academic_prompt_types
+          writing and grammar:
+            - factual question
+            - how-to question
+            - request to fix a sentence or paragraph
+            - comparison between two options
+            - request for advice
+            - request for an explanation of a concept
+            - casual conversation
+
     - name: user_style
       column_type: sampler
-      sampler_type: category
+      sampler_type: subcategory
       params:
+        category: domain
         values:
-          - one short line with no punctuation
-          - two or three full sentences with some context
-          - a long message with background details
-          - a message that includes a code snippet or error text
+          software engineering: &technical_user_styles
+            - one short line with no punctuation
+            - two or three full sentences with some context
+            - a long message with background details
+            - a message that includes a code snippet or error text
+          data science: *technical_user_styles
+          cooking: &plain_user_styles
+            - one short line with no punctuation
+            - two or three full sentences with some context
+            - a long message with background details
+          personal finance: *plain_user_styles
+          health and fitness: *plain_user_styles
+          travel: *plain_user_styles
+          home repair: *plain_user_styles
+          science: *plain_user_styles
+          history: *plain_user_styles
+          writing and grammar: *plain_user_styles
 
     - name: prompt
       column_type: llm-text
