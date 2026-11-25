@@ -6,22 +6,29 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 from llm_lab.cli import app
-from llm_lab.cli.datasets.deps import get_dataset_designer, get_dataset_hub, get_model_server
+from llm_lab.cli.datasets.deps import get_dataset_designer, get_dataset_hub, get_model_server, get_seed_store
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs.deps import get_job_orchestrator
 from llm_lab.datasets.hub import HubDataset, StoredDataset
 from llm_lab.datasets.job import build_dataset_job
-from llm_lab.datasets.recipe import PortableRecipe, Recipe, parse_recipe
+from llm_lab.datasets.recipe import Recipe, parse_recipe
 from llm_lab.datasets.repository import RepositoryFilePaths, RepositoryMetadata
-from llm_lab.datasets.seeds import plan_seed_upload
 from llm_lab.jobs.protocol import JobRecord, JobSpec, Running
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings, get_settings
-from tests.conftest import FakeDesigner, FakeHub, Journal, build_model_config, build_recipe_source, invoke_cli, run_cli
+from tests.conftest import (
+    FakeDesigner,
+    FakeHub,
+    FakeSeedStore,
+    Journal,
+    build_model_config,
+    build_recipe_source,
+    invoke_cli,
+    run_cli,
+)
 
 
 @dataclass
@@ -53,6 +60,7 @@ def build_app(
             get_model_server: lambda: FakeServer(journal),
             get_dataset_designer: lambda: FakeDesigner(journal, Path("artifacts") / "sentences"),
             get_dataset_hub: lambda: hub,
+            get_seed_store: lambda: FakeSeedStore(journal),
             get_job_orchestrator: lambda: orchestrator,
         }
     )
@@ -158,7 +166,7 @@ def test_command_reports_each_invalid_section_of_a_recipe(journal: Journal, tmp_
 
 
 def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
-    journal: Journal, recipe_path: Path, portable_recipe: PortableRecipe
+    journal: Journal, recipe_path: Path, recipe: Recipe
 ) -> None:
     orchestrator = FakeOrchestrator()
     cli = build_app(journal, FakeHub(journal), orchestrator, "ghcr.io/lab/datasets:1")
@@ -167,39 +175,33 @@ def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
         cli, ["datasets", "submit", str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"]
     )
 
-    expected = [
-        build_dataset_job(portable_recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
-    ]
+    expected = [build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")]
     assert orchestrator.submitted == expected, f"Expected {expected}, got {orchestrator.submitted}."
     assert (exit_code, JobRecord.model_validate_json(output).status.condition) == (0, "running"), f"Got {output!r}."
     assert journal.events == ["validate Qwen/Qwen3-8B", "read lab/sentences"], f"Got {journal.events}."
 
 
-def test_submit_uploads_local_seeds_and_starts_a_job_that_reads_them_from_the_bucket(
+def test_submit_stores_local_seeds_and_starts_a_job_that_reads_them_from_the_hub(
     journal: Journal, tmp_path: Path
 ) -> None:
-    seeds = tmp_path / "questions.parquet"
-    pd.DataFrame({"question": ["Why is the sky blue?"]}).to_parquet(seeds)
     recipe_path = tmp_path / "questions.yaml"
-    recipe_path.write_text(
-        build_recipe_source([build_model_config("writer")], seed_source={"seed_type": "local", "path": str(seeds)})
-    )
+    seed = {"files": {"kind": "local", "path": "questions.parquet"}}
+    recipe_path.write_text(build_recipe_source([build_model_config("writer")], seed=seed))
     orchestrator = FakeOrchestrator()
-    hub = FakeHub(journal)
-    cli = build_app(journal, hub, orchestrator, "ghcr.io/lab/datasets:1")
+    cli = build_app(journal, FakeHub(journal), orchestrator, "ghcr.io/lab/datasets:1")
 
     exit_code, _ = invoke_cli(
         cli, ["datasets", "submit", str(recipe_path), "--dataset", "lab/questions", "--rows", "4"]
     )
 
-    plan = plan_seed_upload(parse_recipe(recipe_path.read_text()), "lab/llm-lab-seeds")
-    dataset = HubDataset(namespace="lab", name="questions")
-    actual = (exit_code, journal.events, hub.uploads, orchestrator.submitted)
+    job_recipe = parse_recipe(
+        gzip.decompress(base64.b64decode(orchestrator.submitted[0].environment["LLM_LAB_RECIPE"])).decode()
+    )
+    actual = (exit_code, journal.events, job_recipe.seed and job_recipe.seed.files.path)
     expected = (
         0,
-        ["validate Qwen/Qwen3-8B", "read lab/questions", "upload seeds to lab/llm-lab-seeds"],
-        [plan.upload],
-        [build_dataset_job(plan.recipe, dataset, 4, "ghcr.io/lab/datasets:1")],
+        ["store seeds of lab/questions", "validate Qwen/Qwen3-8B", "read lab/questions"],
+        "buckets/lab/seeds/0a1b/questions.parquet",
     )
     assert actual == expected, f"Expected {expected}, got {actual}."
 
@@ -215,10 +217,8 @@ def test_submit_requires_the_datasets_image(journal: Journal, recipe_path: Path)
     assert orchestrator.submitted == [], f"Expected no job, got {orchestrator.submitted}."
 
 
-def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(portable_recipe: PortableRecipe) -> None:
-    spec = build_dataset_job(
-        portable_recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1"
-    )
+def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: Recipe) -> None:
+    spec = build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
 
     decoded = gzip.decompress(base64.b64decode(spec.environment["LLM_LAB_RECIPE"])).decode()
     actual = (spec.name, spec.image, spec.command, set(spec.environment), spec.secret_environment, spec.disk_gb)
@@ -231,10 +231,8 @@ def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(portable_
         120,
     )
     assert actual == expected, f"Expected {expected}, got {actual}."
-    assert (spec.ttl_seconds_after_finished, spec.placement) == (600, portable_recipe.recipe.job.placement), (
-        "Expected the recipe job."
-    )
-    assert decoded == portable_recipe.recipe.source, "Expected the job to carry the recipe file unchanged."
+    assert (spec.ttl_seconds_after_finished, spec.placement) == (600, recipe.job.placement), "Expected the recipe job."
+    assert decoded == recipe.source, "Expected the job to carry the recipe file unchanged."
     assert spec.artifacts_directory == spec.environment["LLM_LAB_ARTIFACTS_DIR"], (
         "Expected destroy to download the directory where Data Designer writes."
     )

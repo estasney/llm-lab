@@ -5,7 +5,7 @@ from typing import Annotated, assert_never
 import typer
 from pydantic.json_schema import GenerateJsonSchema
 
-from llm_lab.cli.datasets.deps import DatasetDesignerDep, DatasetHubDep, ModelServerDep
+from llm_lab.cli.datasets.deps import DatasetDesignerDep, DatasetHubDep, ModelServerDep, SeedStoreDep
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs import report
 from llm_lab.cli.jobs.deps import JobOrchestratorDep
@@ -20,10 +20,10 @@ from llm_lab.datasets.hub import (
     parse_hub_dataset,
 )
 from llm_lab.datasets.job import build_dataset_job
-from llm_lab.datasets.recipe import PortableRecipe, Recipe, RecipeFile, parse_portable_recipe, parse_recipe
-from llm_lab.datasets.seeds import plan_seed_upload
+from llm_lab.datasets.recipe import Recipe, RecipeFile, parse_recipe
+from llm_lab.datasets.seeds import SeedStore, resolve_recipe
 from llm_lab.errors import CommandError
-from llm_lab.settings import Settings, SettingsDep
+from llm_lab.settings import SettingsDep
 
 app = DependentTyper(name="datasets", no_args_is_help=True, help="Create datasets from recipes.")
 
@@ -35,23 +35,19 @@ type DatasetOption = Annotated[
 type RowsOption = Annotated[int, typer.Option(min=1, help="Number of rows to generate.")]
 
 
-def load_recipe(path: Path) -> Recipe:
+def load_recipe(path: Path, dataset: HubDataset, seeds: SeedStore) -> Recipe:
     with reading_yaml_file(path, "recipe"):
-        return parse_recipe(path.read_text())
+        return resolve_recipe(path.read_text(), path.parent, dataset, seeds)
 
 
-def prepare_dataset(
-    recipe_path: Path, dataset: HubDataset, settings: Settings, designer: DatasetDesigner, hub: DatasetHub
-) -> tuple[PortableRecipe, HubRepository]:
-    recipe = load_recipe(recipe_path)
+def check_dataset(recipe: Recipe, dataset: HubDataset, designer: DatasetDesigner, hub: DatasetHub) -> HubRepository:
     designer.validate(recipe)
-    plan = plan_seed_upload(recipe, f"{dataset.namespace}/{settings.seed_bucket_name}")
     repository = hub.read(dataset)
     match repository:
         case StoredDataset(recipe_source=source):
             with reading_yaml_file(f"{dataset.repo_id}/recipe.yaml", "recipe"):
-                stored = parse_portable_recipe(source)
-            if not plan.recipe.generates_rows_like(stored):
+                stored = parse_recipe(source)
+            if not recipe.generates_rows_like(stored):
                 raise CommandError(
                     f"The recipe differs from the recipe of the dataset {dataset.repo_id}. "
                     "Rows of one dataset come from one recipe."
@@ -60,9 +56,7 @@ def prepare_dataset(
             pass
         case _:
             assert_never(repository)
-    if plan.upload is not None:
-        hub.upload_seeds(plan.upload)
-    return plan.recipe, repository
+    return repository
 
 
 @app.command("submit", help="Start a Vast.ai job that creates the dataset of a recipe.")
@@ -73,11 +67,13 @@ def submit_dataset(
     settings: SettingsDep,
     designer: DatasetDesignerDep,
     hub: DatasetHubDep,
+    seeds: SeedStoreDep,
     orchestrator: JobOrchestratorDep,
 ) -> None:
     if settings.datasets_image is None:
         raise CommandError("The datasets image is not set. Set the environment variable LLM_LAB_DATASETS_IMAGE.")
-    recipe, _ = prepare_dataset(recipe_path, dataset, settings, designer, hub)
+    recipe = load_recipe(recipe_path, dataset, seeds)
+    check_dataset(recipe, dataset, designer, hub)
     report(orchestrator.submit(build_dataset_job(recipe, dataset, rows, settings.datasets_image)))
 
 
@@ -86,14 +82,15 @@ def create_dataset(
     recipe_path: RecipeArgument,
     dataset: DatasetOption,
     rows: RowsOption,
-    settings: SettingsDep,
     server: ModelServerDep,
     designer: DatasetDesignerDep,
     hub: DatasetHubDep,
+    seeds: SeedStoreDep,
 ) -> None:
-    recipe, repository = prepare_dataset(recipe_path, dataset, settings, designer, hub)
-    with server.serve(recipe.recipe):
-        directory = designer.create(recipe.recipe, dataset.name, rows)
+    recipe = load_recipe(recipe_path, dataset, seeds)
+    repository = check_dataset(recipe, dataset, designer, hub)
+    with server.serve(recipe):
+        directory = designer.create(recipe, dataset.name, rows)
     typer.echo(hub.publish(dataset, repository, directory, recipe))
 
 

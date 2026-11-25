@@ -1443,6 +1443,28 @@
       "title": "GenerationStrategy",
       "type": "string"
     },
+    "HubSeedFiles": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "hub",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Seed files on the Hub, such as buckets/<namespace>/<bucket>/seeds/*.parquet or datasets/<namespace>/<dataset>/data/*.parquet.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "title": "HubSeedFiles",
+      "type": "object"
+    },
     "HuggingFaceSeedSource": {
       "properties": {
         "seed_type": {
@@ -2401,6 +2423,28 @@
       "title": "LocalFileSeedSource",
       "type": "object"
     },
+    "LocalSeedFiles": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "local",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Seed file, or a wildcard such as seeds/*.parquet, relative to the folder of the recipe file. llm-lab uploads the files to a Hub bucket before a run.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "title": "LocalSeedFiles",
+      "type": "object"
+    },
     "ManualDistribution": {
       "additionalProperties": false,
       "description": "Manual (discrete) distribution for sampling inference parameters.\n\nSamples from a discrete set of values with optional weights. Useful for testing\nspecific values or creating custom probability distributions for temperature or top_p.\n\nAttributes:\n    distribution_type: Type of distribution (\"manual\").\n    params: Distribution parameters (values, weights).",
@@ -2783,6 +2827,53 @@
         "placement"
       ],
       "title": "RecipeJob",
+      "type": "object"
+    },
+    "RecipeSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "sampling_strategy": {
+          "$ref": "#/$defs/SamplingStrategy",
+          "default": "ordered"
+        },
+        "selection_strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRange"
+            },
+            {
+              "$ref": "#/$defs/PartitionBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selection Strategy"
+        },
+        "files": {
+          "discriminator": {
+            "mapping": {
+              "hub": "#/$defs/HubSeedFiles",
+              "local": "#/$defs/LocalSeedFiles"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LocalSeedFiles"
+            },
+            {
+              "$ref": "#/$defs/HubSeedFiles"
+            }
+          ],
+          "title": "Files"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "title": "RecipeSeed",
       "type": "object"
     },
     "RemoteValidatorParams": {
@@ -4003,6 +4094,17 @@
       },
       "title": "Vllm Args",
       "type": "array"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecipeSeed"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "data_designer": {
       "$ref": "#/$defs/DataDesignerConfig"

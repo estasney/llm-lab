@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from llm_lab.datasets.recipe import PortableRecipe, Recipe
+from llm_lab.datasets.recipe import Recipe
 
 
 class RunFilePaths(BaseModel):
@@ -104,7 +104,7 @@ def write_dataset_card(name: str, metadata: RepositoryMetadata, recipe: Recipe) 
 
 
 def plan_repository_files(
-    name: str, run_id: str, run: GeneratedRun, stored: RepositoryMetadata, recipe: PortableRecipe
+    name: str, run_id: str, run: GeneratedRun, stored: RepositoryMetadata, recipe: Recipe
 ) -> Mapping[str, Path | bytes]:
     metadata = add_run_to_metadata(run_id, run.metadata, stored)
     run_files = {
@@ -120,6 +120,6 @@ def plan_repository_files(
         **run_files,
         "builder_config.json": run.directory / "builder_config.json",
         "metadata.json": json.dumps(metadata.model_dump(mode="json"), indent=2).encode(),
-        "README.md": write_dataset_card(name, metadata, recipe.recipe).encode(),
-        "recipe.yaml": recipe.recipe.source.encode(),
+        "README.md": write_dataset_card(name, metadata, recipe).encode(),
+        "recipe.yaml": recipe.source.encode(),
     }

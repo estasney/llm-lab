@@ -7,10 +7,14 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from data_designer.config.seed import SamplingStrategy, SeedConfig
+from data_designer.engine.secret_resolver import SecretResolutionError
+from pydantic import SecretStr
 
-from llm_lab.datasets.designer import DataDesignerRunner
+from llm_lab.datasets.designer import DataDesignerRunner, HubTokenResolver
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 from llm_lab.errors import CommandError
+from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings
 from tests.conftest import build_model_config, build_recipe_source
 
@@ -90,3 +94,34 @@ def test_create_generates_the_rows_with_the_served_model(
     actual = (directory.parent, len(dataset), set(dataset["sentence"].tolist()), set(chat_server.models))
     expected = (tmp_path / "artifacts", 4, {"A generated sentence."}, {"Qwen/Qwen3-8B"})
     assert actual == expected, f"Expected {expected}, got {actual}."
+
+
+def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Path) -> None:
+    seed = {"files": {"kind": "hub", "path": "buckets/lab/seeds/0a1b/*.parquet"}, "sampling_strategy": "shuffle"}
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
+
+    actual = build_runner(tmp_path, 8000).build_config(recipe).get_seed_config()
+
+    expected = SeedConfig.model_validate(
+        {
+            "source": {"seed_type": "hf", "path": "buckets/lab/seeds/0a1b/*.parquet", "token": SecretName.hf_token},
+            "sampling_strategy": SamplingStrategy.SHUFFLE,
+        }
+    )
+    assert actual == expected, f"Expected {expected}, got {actual}."
+
+
+def test_hub_token_resolver_gives_the_token_of_the_settings() -> None:
+    actual = HubTokenResolver(SecretStr("hf_secret")).resolve(SecretName.hf_token)
+
+    assert actual == "hf_secret", f"Expected the token of the settings, got {actual!r}."
+
+
+@pytest.mark.parametrize(
+    ("secret", "token"),
+    [(SecretName.hf_token, None), ("OPENAI_API_KEY", SecretStr("hf_secret"))],
+    ids=["no-token", "other-name"],
+)
+def test_hub_token_resolver_leaves_other_secrets_to_the_next_resolver(secret: str, token: SecretStr | None) -> None:
+    with pytest.raises(SecretResolutionError):
+        HubTokenResolver(token).resolve(secret)

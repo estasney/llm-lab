@@ -1,90 +1,64 @@
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-import pandas as pd
 import pytest
-import yaml
+from data_designer.config.seed import SamplingStrategy
 
-from llm_lab.datasets.recipe import parse_recipe
-from llm_lab.datasets.seeds import SeedPlan, plan_seed_upload
-from tests.conftest import build_model_config, build_recipe_source
-
-
-def write_seed_files(directory: Path, questions: list[str]) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
-    for index, question in enumerate(questions):
-        pd.DataFrame({"question": [question]}).to_parquet(directory / f"part-{index}.parquet")
-    return directory
+from llm_lab.datasets.hub import HubDataset
+from llm_lab.datasets.recipe import HubSeed, HubSeedFiles, SeedLocation, parse_recipe
+from llm_lab.datasets.seeds import name_seed_folder, resolve_recipe
+from tests.conftest import FakeSeedStore, Journal, build_model_config, build_recipe_source
 
 
-def plan_local_seeds(path: str) -> SeedPlan:
-    source = build_recipe_source([build_model_config("writer")], seed_source={"seed_type": "local", "path": path})
-    return plan_seed_upload(parse_recipe(source), "lab/llm-lab-seeds")
+def test_recipe_with_local_seeds_runs_from_the_files_that_the_store_uploads(journal: Journal, tmp_path: Path) -> None:
+    store = FakeSeedStore(journal)
+    seed = {"files": {"kind": "local", "path": "seeds/*.parquet"}, "sampling_strategy": "shuffle"}
+    source = build_recipe_source([build_model_config("writer")], seed=seed)
 
+    recipe = resolve_recipe(source, tmp_path, HubDataset(namespace="lab", name="questions"), store)
 
-def read_seed_path(plan: SeedPlan) -> str:
-    return yaml.safe_load(plan.recipe.recipe.source)["data_designer"]["seed_config"]["source"]["path"]
-
-
-def find_upload_folder(plan: SeedPlan) -> PurePosixPath:
-    if plan.upload is None:
-        pytest.fail("Expected local seed files to need an upload.")
-    folders = {PurePosixPath(path).parent for path in plan.upload.files}
-    if len(folders) != 1:
-        pytest.fail(f"Expected the seed files in one bucket folder, got {folders}.")
-    return folders.pop()
-
-
-def test_local_seed_files_go_to_the_bucket_folder_that_the_recipe_reads(tmp_path: Path) -> None:
-    seeds = write_seed_files(tmp_path / "seeds", ["Why is the sky blue?", "What is a tide?"])
-
-    plan = plan_local_seeds(f"{seeds}/*.parquet")
-
-    folder = find_upload_folder(plan)
-    actual = (plan.upload and plan.upload.bucket_id, plan.upload and dict(plan.upload.files), read_seed_path(plan))
-    expected = (
-        "lab/llm-lab-seeds",
-        {f"{folder}/part-0.parquet": seeds / "part-0.parquet", f"{folder}/part-1.parquet": seeds / "part-1.parquet"},
-        f"buckets/lab/llm-lab-seeds/{folder}/*.parquet",
+    expected_seed = HubSeed(
+        files=HubSeedFiles(kind=SeedLocation.hub, path="buckets/lab/seeds/0a1b/*.parquet"),
+        sampling_strategy=SamplingStrategy.SHUFFLE,
     )
+    actual = (store.patterns, recipe.seed, parse_recipe(recipe.source) == recipe)
+    expected = ([tmp_path / "seeds" / "*.parquet"], expected_seed, True)
     assert actual == expected, f"Expected {expected}, got {actual}."
 
 
-def test_one_local_seed_file_keeps_its_name_in_the_bucket(tmp_path: Path) -> None:
-    seeds = write_seed_files(tmp_path / "seeds", ["Why is the sky blue?"])
+@pytest.mark.parametrize(
+    "seed",
+    [None, {"files": {"kind": "hub", "path": "datasets/lab/questions/data/*.parquet"}}],
+    ids=["no-seed", "hub-seed"],
+)
+def test_recipe_without_local_seeds_runs_as_written(
+    journal: Journal, tmp_path: Path, seed: dict[str, object] | None
+) -> None:
+    source = build_recipe_source([build_model_config("writer")], seed=seed)
 
-    plan = plan_local_seeds(str(seeds / "part-0.parquet"))
+    recipe = resolve_recipe(source, tmp_path, HubDataset(namespace="lab", name="questions"), FakeSeedStore(journal))
 
-    folder = find_upload_folder(plan)
-    assert read_seed_path(plan) == f"buckets/lab/llm-lab-seeds/{folder}/part-0.parquet", f"Got {read_seed_path(plan)}."
+    assert (recipe.source, journal.events) == (source, []), f"Got {recipe.source!r} and {journal.events}."
 
 
 @pytest.mark.parametrize(
-    ("other_questions", "same_folder"),
-    [(["Why is the sky blue?", "What is a tide?"], True), (["Why is the sky blue?", "What is a wave?"], False)],
-    ids=["same-contents", "other-contents"],
+    ("other", "same_folder"),
+    [
+        ({"part-1.parquet": "bb", "part-0.parquet": "aa"}, True),
+        ({"part-0.parquet": "aa", "part-1.parquet": "cc"}, False),
+        ({"part-0.parquet": "aa", "part-2.parquet": "bb"}, False),
+    ],
+    ids=["same-files", "other-contents", "other-name"],
 )
-def test_bucket_folder_follows_the_contents_of_the_seed_files(
-    tmp_path: Path, other_questions: list[str], *, same_folder: bool
-) -> None:
-    seeds = write_seed_files(tmp_path / "seeds", ["Why is the sky blue?", "What is a tide?"])
-    other = write_seed_files(tmp_path / "other", other_questions)
-
-    folders = (
-        find_upload_folder(plan_local_seeds(f"{seeds}/*.parquet")),
-        find_upload_folder(plan_local_seeds(f"{other}/*.parquet")),
-    )
+def test_seed_folder_follows_the_names_and_contents_of_the_files(other: dict[str, str], *, same_folder: bool) -> None:
+    folders = name_seed_folder({"part-0.parquet": "aa", "part-1.parquet": "bb"}), name_seed_folder(other)
 
     assert (folders[0] == folders[1]) == same_folder, f"Expected same folder {same_folder}, got {folders}."
 
 
-@pytest.mark.parametrize(
-    "seed_source",
-    [None, {"seed_type": "hf", "path": "datasets/lab/questions/data/*.parquet"}],
-    ids=["no-seeds", "hub-seeds"],
-)
-def test_recipe_without_local_seeds_runs_unchanged_with_no_upload(seed_source: dict[str, str] | None) -> None:
-    source = build_recipe_source([build_model_config("writer")], seed_source=seed_source)
+def test_stored_recipe_keeps_the_data_designer_section_of_the_written_recipe(journal: Journal, tmp_path: Path) -> None:
+    written = (Path(__file__).parent.parent / "recipes" / "concise-dpo.yaml").read_text()
+    source = f"{written}\nseed:\n  files:\n    kind: local\n    path: questions.parquet\n"
 
-    plan = plan_seed_upload(parse_recipe(source), "lab/llm-lab-seeds")
+    recipe = resolve_recipe(source, tmp_path, HubDataset(namespace="lab", name="answers"), FakeSeedStore(journal))
 
-    assert (plan.recipe.recipe.source, plan.upload) == (source, None), f"Got {plan}."
+    assert recipe.data_designer == parse_recipe(written).data_designer, "Expected data_designer to stay as written."

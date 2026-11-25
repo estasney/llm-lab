@@ -1,10 +1,7 @@
-from pathlib import Path
-
-import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from llm_lab.datasets.recipe import PortableRecipe, RecipeJob, parse_portable_recipe, parse_recipe
+from llm_lab.datasets.recipe import HubSeed, HubSeedFiles, Recipe, RecipeJob, SeedLocation, parse_recipe
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import PlacementKind, ResourceRequest
 from tests.conftest import build_model_config, build_recipe_source
@@ -46,14 +43,36 @@ def test_recipe_without_exactly_one_model_on_one_provider_is_rejected(model_conf
         parse_recipe(build_recipe_source(model_configs))
 
 
+def build_hub_seed(path: str) -> dict[str, dict[str, str]]:
+    return {"files": {"kind": "hub", "path": f"buckets/lab/llm-lab-seeds/{path}"}}
+
+
+def test_recipe_runs_with_the_hub_seed_that_it_names() -> None:
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=build_hub_seed("0a1b/*.parquet")))
+
+    expected = HubSeed(files=HubSeedFiles(kind=SeedLocation.hub, path="buckets/lab/llm-lab-seeds/0a1b/*.parquet"))
+    assert recipe.seed == expected, f"Expected {expected}, got {recipe.seed}."
+
+
+def test_recipe_with_local_seeds_does_not_run_before_they_are_uploaded() -> None:
+    source = build_recipe_source([build_model_config("writer")], seed={"files": {"kind": "local", "path": "a.parquet"}})
+
+    with pytest.raises(CommandError, match="Upload them before the recipe runs"):
+        parse_recipe(source)
+
+
 @pytest.mark.parametrize(
     "source",
     [
         build_recipe_source([build_model_config("writer")], studio={"ui": {}}),
         build_recipe_source([build_model_config("writer")], job={"disk_gb": 120, "ttl_seconds_after_finished": 600}),
         build_recipe_source([build_model_config("writer")]).replace("llm-text", "llm-poem"),
+        build_recipe_source([build_model_config("writer")]).replace(
+            "data_designer:\n",
+            "data_designer:\n  seed_config:\n    source:\n      seed_type: hf\n      path: x.parquet\n",
+        ),
     ],
-    ids=["unknown-section", "no-placement", "unknown-column-type"],
+    ids=["unknown-section", "no-placement", "unknown-column-type", "data-designer-seed"],
 )
 def test_recipe_with_an_invalid_section_is_rejected(source: str) -> None:
     with pytest.raises(ValidationError):
@@ -66,36 +85,10 @@ def test_recipe_with_an_invalid_section_is_rejected(source: str) -> None:
         (build_recipe_source([build_model_config("writer")]).replace("2.5", "4.0"), True),
         (build_recipe_source([build_model_config("writer")], prompt="Name a {{ topic }}."), False),
         (build_recipe_source([build_model_config("writer")]).replace("'2'", "'4'"), False),
+        (build_recipe_source([build_model_config("writer")], seed=build_hub_seed("seeds/0a1b/*.parquet")), False),
     ],
-    ids=["other-job", "other-column", "other-vllm-args"],
+    ids=["other-job", "other-column", "other-vllm-args", "other-seed"],
 )
-def test_recipes_generate_like_rows_when_only_the_job_differs(
-    portable_recipe: PortableRecipe, other: str, *, expected: bool
-) -> None:
-    actual = portable_recipe.generates_rows_like(parse_portable_recipe(other))
+def test_recipes_generate_like_rows_when_only_the_job_differs(recipe: Recipe, other: str, *, expected: bool) -> None:
+    actual = recipe.generates_rows_like(parse_recipe(other))
     assert actual == expected, f"Expected {expected} for {other!r}, got {actual}."
-
-
-@pytest.mark.parametrize(
-    "seed_source",
-    [
-        {"seed_type": "hf", "path": "buckets/lab/llm-lab-seeds/seeds/0f/*.parquet"},
-        {"seed_type": "hf", "path": "datasets/lab/questions/data/*.parquet"},
-    ],
-    ids=["bucket", "dataset"],
-)
-def test_recipe_with_hub_seeds_runs_on_another_machine(seed_source: dict[str, str]) -> None:
-    source = build_recipe_source([build_model_config("writer")], seed_source=seed_source)
-
-    portable = parse_portable_recipe(source)
-
-    assert portable.recipe.source == source, "Expected the portable recipe to keep the recipe file unchanged."
-
-
-def test_recipe_with_local_seeds_does_not_run_on_another_machine(tmp_path: Path) -> None:
-    seeds = tmp_path / "questions.parquet"
-    pd.DataFrame({"question": ["Why is the sky blue?"]}).to_parquet(seeds)
-    source = build_recipe_source([build_model_config("writer")], seed_source={"seed_type": "local", "path": str(seeds)})
-
-    with pytest.raises(CommandError, match="only from an hf seed source"):
-        parse_portable_recipe(source)
