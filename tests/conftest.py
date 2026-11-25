@@ -6,7 +6,7 @@ import typer
 import yaml
 from typer.testing import CliRunner
 
-from llm_lab.datasets.hub import HubDataset
+from llm_lab.datasets.hub import HubDataset, HubRepository
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 
 
@@ -74,14 +74,16 @@ class FakeDesigner:
 @dataclass
 class FakeHub:
     journal: Journal
-    existing: set[str] = field(default_factory=set[str])
+    repositories: dict[str, HubRepository] = field(default_factory=dict[str, HubRepository])
+    published: list[HubRepository] = field(default_factory=list[HubRepository])
 
-    def exists(self, dataset: HubDataset) -> bool:
-        self.journal.events.append(f"exists {dataset.repo_id}")
-        return dataset.repo_id in self.existing
+    def read(self, dataset: HubDataset) -> HubRepository:
+        self.journal.events.append(f"read {dataset.repo_id}")
+        return self.repositories.get(dataset.repo_id)
 
-    def publish(self, dataset: HubDataset, directory: Path, recipe: Recipe) -> str:
+    def publish(self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: Recipe) -> str:
         self.journal.events.append(f"publish {dataset.repo_id} {directory.name}")
+        self.published.append(repository)
         return f"https://huggingface.co/datasets/{dataset.repo_id}"
 
 

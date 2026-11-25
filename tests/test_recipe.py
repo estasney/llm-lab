@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from llm_lab.datasets.recipe import RecipeJob, parse_recipe
+from llm_lab.datasets.recipe import Recipe, RecipeJob, parse_recipe
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import PlacementKind, ResourceRequest
 from tests.conftest import build_model_config, build_recipe_source
@@ -55,3 +55,17 @@ def test_recipe_without_exactly_one_model_on_one_provider_is_rejected(model_conf
 def test_recipe_with_an_invalid_section_is_rejected(source: str) -> None:
     with pytest.raises(ValidationError):
         parse_recipe(source)
+
+
+@pytest.mark.parametrize(
+    ("other", "expected"),
+    [
+        (build_recipe_source([build_model_config("writer")]).replace("2.5", "4.0"), True),
+        (build_recipe_source([build_model_config("writer")], prompt="Name a {{ topic }}."), False),
+        (build_recipe_source([build_model_config("writer")]).replace("'2'", "'4'"), False),
+    ],
+    ids=["other-job", "other-column", "other-vllm-args"],
+)
+def test_recipes_generate_like_rows_when_only_the_job_differs(recipe: Recipe, other: str, *, expected: bool) -> None:
+    actual = recipe.generates_rows_like(parse_recipe(other))
+    assert actual == expected, f"Expected {expected} for {other!r}, got {actual}."
