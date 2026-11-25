@@ -37,88 +37,70 @@ data_designer:
             enable_thinking: false
 
   columns:
-    - name: domain
+    - name: prompt_type
       column_type: sampler
       sampler_type: category
       params:
         values:
-          - software engineering
-          - data science
-          - cooking
-          - personal finance
-          - health and fitness
-          - travel
-          - home repair
-          - science
-          - history
-          - writing and grammar
+          - factual question
+          - how-to question
+          - code question
+          - debugging request
+          - comparison between two options
+          - request for advice
+          - request for an explanation of a concept
+          - casual conversation
 
-    - name: prompt_type
+    - name: domain
       column_type: sampler
       sampler_type: subcategory
       params:
-        category: domain
+        category: prompt_type
         values:
-          software engineering: &technical_prompt_types
-            - factual question
-            - how-to question
-            - code question
-            - debugging request
-            - comparison between two options
-            - request for advice
-            - request for an explanation of a concept
-            - casual conversation
-          data science: *technical_prompt_types
-          cooking: &practical_prompt_types
-            - factual question
-            - how-to question
-            - request to troubleshoot a problem
-            - comparison between two options
-            - request for advice
-            - request for an explanation of a concept
-            - casual conversation
-          personal finance: *practical_prompt_types
-          health and fitness: *practical_prompt_types
-          travel: *practical_prompt_types
-          home repair: *practical_prompt_types
-          science: &academic_prompt_types
-            - factual question
-            - comparison between two options
-            - request for an explanation of a concept
-            - casual conversation
-          history: *academic_prompt_types
-          writing and grammar:
-            - factual question
-            - how-to question
-            - request to fix a sentence or paragraph
-            - comparison between two options
-            - request for advice
-            - request for an explanation of a concept
-            - casual conversation
+          factual question: &all_domains
+            - software engineering
+            - data science
+            - science
+            - history
+          how-to question:
+            - software engineering
+            - data science
+            - science
+          code question: &technical_domains
+            - software engineering
+            - data science
+          debugging request: *technical_domains
+          comparison between two options: *all_domains
+          request for advice: *technical_domains
+          request for an explanation of a concept: *all_domains
+          casual conversation: *all_domains
 
     - name: user_style
       column_type: sampler
+      sampler_type: category
+      params:
+        values:
+          - one short line with no punctuation
+          - two or three short lines
+        weights: [0.7, 0.3]
+
+    - name: code_attachment
+      column_type: sampler
       sampler_type: subcategory
       params:
-        category: domain
+        category: prompt_type
         values:
-          software engineering: &technical_user_styles
-            - one short line with no punctuation
-            - two or three full sentences with some context
-            - a long message with background details
-            - a message that includes a code snippet or error text
-          data science: *technical_user_styles
-          cooking: &plain_user_styles
-            - one short line with no punctuation
-            - two or three full sentences with some context
-            - a long message with background details
-          personal finance: *plain_user_styles
-          health and fitness: *plain_user_styles
-          travel: *plain_user_styles
-          home repair: *plain_user_styles
-          science: *plain_user_styles
-          history: *plain_user_styles
-          writing and grammar: *plain_user_styles
+          factual question: &no_code
+            - The message contains no code.
+          how-to question: *no_code
+          code question: &maybe_code
+            - The message contains no code.
+            - The message also contains a code snippet or error text.
+          debugging request: *maybe_code
+          comparison between two options: *no_code
+          request for advice: *no_code
+          request for an explanation of a concept: *no_code
+          casual conversation: *no_code
 
     - name: prompt
       column_type: llm-text
@@ -127,6 +109,7 @@ data_designer:
         Write one message that a user sends to an AI assistant.
         The message is a {{ prompt_type }} about {{ domain }}.
         Write it as {{ user_style }}.
+        {{ code_attachment }}
         Write only the message, with no quotes and no label.
 
     - name: baseline_answer
