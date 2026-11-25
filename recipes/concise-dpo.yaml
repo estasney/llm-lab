@@ -4,7 +4,7 @@ job:
   ttl_seconds_after_finished: 600
   placement:
     kind: resources
-    gpu_name: RTX 6000Ada
+    gpu_name: RTX 5090
     gpu_count: 1
     max_dollars_per_hour: 1.5
 
