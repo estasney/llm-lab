@@ -7,6 +7,10 @@ job:
     gpu_name: RTX 5090
     gpu_count: 1
     max_dollars_per_hour: 1.5
+    max_download_dollars_per_gb: 0.01
+    countries:
+      exclude: [CN]
+    min_duration_hours: 4
 
 vllm_args:
   - --max-model-len
