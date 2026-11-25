@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic.json_schema import GenerateJsonSchema
 
 from llm_lab.cli.datasets.deps import DatasetDesignerDep, DatasetHubDep, ModelServerDep
 from llm_lab.cli.dependent_typer import DependentTyper
@@ -72,7 +73,8 @@ def create_dataset(
 
 @app.command("schema", help="Print the JSON schema of recipe files.")
 def print_recipe_schema() -> None:
-    typer.echo(json.dumps(RecipeFile.model_json_schema(), indent=2))
+    schema = {"$schema": GenerateJsonSchema.schema_dialect, **RecipeFile.model_json_schema()}
+    typer.echo(json.dumps(schema, indent=2))
 
 
 @app.command("list")
