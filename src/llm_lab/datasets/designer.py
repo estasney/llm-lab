@@ -8,6 +8,7 @@ from data_designer.config.run_config import RunConfig
 from data_designer.config.seed import SeedConfig
 from data_designer.config.seed_source import HuggingFaceSeedSource, LocalFileSeedSource
 from data_designer.interface import DataDesigner
+from pydantic import MISSING
 
 from llm_lab.datasets.recipe import HubSeed, LocalSeed, Recipe
 from llm_lab.errors import CommandError
@@ -49,7 +50,7 @@ class DataDesignerRunner:
             model_providers=[ModelProvider(name=recipe.provider_name, endpoint=f"{self.settings.vllm_base_url}/v1")],
             secret_resolver=SettingsSecretSource(self.settings),
         )
-        if recipe.rows_per_batch is not None:
+        if recipe.rows_per_batch is not MISSING:
             designer.set_run_config(RunConfig(buffer_size=recipe.rows_per_batch))
         return designer
 

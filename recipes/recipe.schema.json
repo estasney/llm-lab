@@ -4113,18 +4113,10 @@
       "title": "Seed"
     },
     "rows_per_batch": {
-      "anyOf": [
-        {
-          "exclusiveMinimum": 0,
-          "type": "integer"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
       "description": "Rows that Data Designer generates and writes to disk as one batch. Data Designer uses its own default when this is not set.",
-      "title": "Rows Per Batch"
+      "exclusiveMinimum": 0,
+      "title": "Rows Per Batch",
+      "type": "integer"
     },
     "data_designer": {
       "$ref": "#/$defs/DataDesignerConfig"

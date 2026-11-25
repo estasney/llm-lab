@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Self
 import yaml
 from data_designer.config.data_designer_config import DataDesignerConfig
 from data_designer.config.seed import IndexRange, PartitionBlock, SamplingStrategy
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator
+from pydantic import MISSING, BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt, field_validator
 
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import ExplicitOffer, ResourceRequest
@@ -55,8 +55,8 @@ class RecipeFile(BaseModel):
     job: RecipeJob
     vllm_args: tuple[str, ...] = ()
     seed: Annotated[LocalSeed | HubSeed, Field(discriminator="kind")] | None = None
-    rows_per_batch: PositiveInt | None = Field(
-        default=None,
+    rows_per_batch: PositiveInt | MISSING = Field(
+        default=MISSING,
         description="Rows that Data Designer generates and writes to disk as one batch. "
         "Data Designer uses its own default when this is not set.",
     )
@@ -76,7 +76,7 @@ class Recipe:
     job: RecipeJob
     vllm_args: tuple[str, ...]
     seed: LocalSeed | HubSeed | None
-    rows_per_batch: int | None
+    rows_per_batch: int | MISSING
     data_designer: DataDesignerConfig
     served_model: str
     provider_name: str
