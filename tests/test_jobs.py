@@ -269,8 +269,8 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
             "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)\n"
             'printf \'export PATH="%s"\\n\' "$PATH" > /etc/profile.d/llm-lab-path.sh\n'
             '"$(command -v sshd)" -p 2222 -h /run/sshd/llm-lab-host-key '
-            "-o AuthorizedKeysFile=/run/sshd/llm-lab-authorized-keys -o PasswordAuthentication=no "
-            "-o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password\n"
+            "-o 'AuthorizedKeysFile=/run/sshd/llm-lab-authorized-keys .ssh/authorized_keys' "
+            "-o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password\n"
             "fi\n"
             "if [ ! -e /llm-lab-job-done ]; then\n"
             "python train.py --note 'two words'\n"
