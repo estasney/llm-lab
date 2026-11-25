@@ -10,7 +10,16 @@ from pydantic import BaseModel, Field, SecretStr
 
 from llm_lab.errors import CommandError
 from llm_lab.jobs.access import InstanceAccess, SshEndpoint
-from llm_lab.jobs.protocol import Active, Completed, ExplicitOffer, Halted, JobSpec, ResourceRequest
+from llm_lab.jobs.protocol import (
+    Active,
+    Completed,
+    ExcludedCountries,
+    ExplicitOffer,
+    Halted,
+    IncludedCountries,
+    JobSpec,
+    ResourceRequest,
+)
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings
 
@@ -67,7 +76,25 @@ def label_job(job_name: str) -> str:
 
 
 def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> dict[str, object]:
+    ceilings = {
+        "dph_base": request.max_compute_dollars_per_hour,
+        "storage_cost": request.max_storage_dollars_per_gb_month,
+        "inet_down_cost": request.max_download_dollars_per_gb,
+        "inet_up_cost": request.max_upload_dollars_per_gb,
+    }
+    match request.countries:
+        case IncludedCountries(include=codes):
+            location = {"geolocation": {"in": list(codes)}}
+        case ExcludedCountries(exclude=codes):
+            location = {"geolocation": {"notin": list(codes)}}
+        case None:
+            location = {}
+        case _:
+            assert_never(request.countries)
     return {
+        **{field: {"lte": ceiling} for field, ceiling in ceilings.items() if ceiling is not None},
+        **location,
+        **({"datacenter": {"eq": True}} if request.datacenter_only else {}),
         "cuda_max_good": {"gte": request.min_cuda},
         "gpu_name": {"eq": request.gpu_name},
         "num_gpus": {"eq": request.gpu_count},

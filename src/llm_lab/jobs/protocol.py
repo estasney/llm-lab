@@ -24,6 +24,20 @@ class JobCondition(StrEnum):
 
 type JobName = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")]
 type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+type CountryCode = Annotated[str, Field(pattern=r"^[A-Z]{2}$")]
+type CountryCodes = Annotated[tuple[CountryCode, ...], Field(min_length=1)]
+
+
+class IncludedCountries(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    include: CountryCodes
+
+
+class ExcludedCountries(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exclude: CountryCodes
 
 
 class ResourceRequest(BaseModel):
@@ -33,6 +47,12 @@ class ResourceRequest(BaseModel):
     gpu_name: Annotated[str, Field(min_length=1)]
     gpu_count: PositiveInt
     max_dollars_per_hour: PositiveFloat
+    max_compute_dollars_per_hour: PositiveFloat | None = None
+    max_storage_dollars_per_gb_month: PositiveFloat | None = None
+    max_download_dollars_per_gb: PositiveFloat | None = None
+    max_upload_dollars_per_gb: PositiveFloat | None = None
+    countries: IncludedCountries | ExcludedCountries | None = None
+    datacenter_only: bool = False
     min_cuda: PositiveFloat = 13.0
 
 

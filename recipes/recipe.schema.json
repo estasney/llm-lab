@@ -453,6 +453,17 @@
       "title": "ColumnInequalityConstraint",
       "type": "object"
     },
+    "CountryCode": {
+      "pattern": "^[A-Z]{2}$",
+      "type": "string"
+    },
+    "CountryCodes": {
+      "items": {
+        "$ref": "#/$defs/CountryCode"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
     "CustomColumnConfig": {
       "additionalProperties": false,
       "description": "Configuration for custom user-defined column generators.\n\nCustom columns allow users to provide their own generation logic via a callable function\ndecorated with `@custom_column_generator`. Two strategies are supported: cell_by_cell\n(default, row-based) and full_column (batch-based with DataFrame access).\n\nAttributes:\n    generator_function (required): A callable decorated with @custom_column_generator.\n    generation_strategy: \"cell_by_cell\" (row-based) or \"full_column\" (batch-based).\n    generator_params: Optional typed configuration object (Pydantic BaseModel) passed\n        as the second argument to the generator function.\n\nInherited Attributes:\n    name (required): Unique name of the column to be generated.\n    drop: If True, generate this column but remove it from the final dataset.",
@@ -985,6 +996,19 @@
       "title": "EmbeddingInferenceParams",
       "type": "object"
     },
+    "ExcludedCountries": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "$ref": "#/$defs/CountryCodes"
+        }
+      },
+      "required": [
+        "exclude"
+      ],
+      "title": "ExcludedCountries",
+      "type": "object"
+    },
     "ExplicitOffer": {
       "additionalProperties": false,
       "properties": {
@@ -1406,6 +1430,19 @@
         }
       },
       "title": "ImageInferenceParams",
+      "type": "object"
+    },
+    "IncludedCountries": {
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "$ref": "#/$defs/CountryCodes"
+        }
+      },
+      "required": [
+        "include"
+      ],
+      "title": "IncludedCountries",
       "type": "object"
     },
     "IndexRange": {
@@ -2583,6 +2620,78 @@
           "exclusiveMinimum": 0,
           "title": "Max Dollars Per Hour",
           "type": "number"
+        },
+        "max_compute_dollars_per_hour": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Compute Dollars Per Hour"
+        },
+        "max_storage_dollars_per_gb_month": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Storage Dollars Per Gb Month"
+        },
+        "max_download_dollars_per_gb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Download Dollars Per Gb"
+        },
+        "max_upload_dollars_per_gb": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Upload Dollars Per Gb"
+        },
+        "countries": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IncludedCountries"
+            },
+            {
+              "$ref": "#/$defs/ExcludedCountries"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Countries"
+        },
+        "datacenter_only": {
+          "default": false,
+          "title": "Datacenter Only",
+          "type": "boolean"
         },
         "min_cuda": {
           "default": 13.0,

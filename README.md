@@ -37,6 +37,13 @@ A recipe has three sections:
 
 Jobs rent only hosts whose driver supports CUDA 13.0 or newer, unless the placement sets another `min_cuda`.
 
+A `resources` placement can also set these optional filters:
+
+- `max_compute_dollars_per_hour` and `max_storage_dollars_per_gb_month`: ceilings on the two parts of the total hourly price.
+- `max_download_dollars_per_gb` and `max_upload_dollars_per_gb`: ceilings on the internet traffic prices, which Vast.ai bills on top of the hourly price.
+- `countries`: `include` or `exclude`, with a list of two-letter country codes.
+- `datacenter_only`: `true` to rent only datacenter hosts.
+
 ## Image
 
 The Version workflow tags each merge to `main` and starts the Image workflow for that tag. The Image workflow builds `docker/datasets/Dockerfile` and pushes it to `ghcr.io/estasney/llm-lab-datasets:<tag>`. To build the image of an existing tag again, run the Image workflow from the Actions tab and select the tag.
