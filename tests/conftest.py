@@ -7,6 +7,7 @@ import yaml
 from typer.testing import CliRunner
 
 from llm_lab.datasets.hub import HubDataset, HubRepository
+from llm_lab.datasets.job import JobRecipe, prepare_job_recipe
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 
 
@@ -87,6 +88,17 @@ class FakeHub:
         return f"https://huggingface.co/datasets/{dataset.repo_id}"
 
 
+@dataclass
+class FakeSeedStore:
+    journal: Journal
+    patterns: list[Path] = field(default_factory=list[Path])
+
+    def store(self, pattern: Path, dataset: HubDataset) -> str:
+        self.journal.events.append(f"store seeds of {dataset.repo_id}")
+        self.patterns.append(pattern)
+        return f"buckets/{dataset.namespace}/seeds/0a1b/{pattern.name}"
+
+
 def run_cli(app: typer.Typer, arguments: list[str]) -> str:
     return CliRunner().invoke(app, arguments, catch_exceptions=False).output
 
@@ -116,6 +128,11 @@ def recipe_source() -> str:
 @pytest.fixture
 def recipe(recipe_source: str) -> Recipe:
     return parse_recipe(recipe_source)
+
+
+@pytest.fixture
+def job_recipe(recipe: Recipe) -> JobRecipe:
+    return prepare_job_recipe(recipe, HubDataset(namespace="lab", name="sentences"), FakeSeedStore(Journal()))
 
 
 @pytest.fixture

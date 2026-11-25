@@ -1,3 +1,4 @@
+import os
 from functools import cache, cached_property
 from pathlib import Path
 from typing import Annotated
@@ -9,7 +10,7 @@ from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from llm_lab.dependencies import Depends
-from llm_lab.keyring_settings import KeyringEntry, KeyringSettingsSource, SecretName
+from llm_lab.keyring_settings import KeyringEntry, SecretName, SecretSettingsSource, read_keyring_password
 
 
 def apply_sqlite_pragmas(dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry) -> None:
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     )
     hf_token: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username=SecretName.hf_token)] = Field(
         default=None,
-        description="Hugging Face access token that a job receives when its manifest lists HF_TOKEN in "
+        description="Hugging Face access token that a job receives as HF_TOKEN when its manifest lists HF_TOKEN in "
         "secret_environment. Set it with `llm-lab secrets set HF_TOKEN`.",
     )
     vast_api_key: Annotated[SecretStr | None, KeyringEntry(service="llm-lab", username=SecretName.vast_api_key)] = (
@@ -90,6 +91,12 @@ class Settings(BaseSettings):
         description="Reference of the published datasets image that a dataset job runs.",
         examples=["ghcr.io/example/llm-lab-datasets:0.1.2"],
     )
+    seed_bucket_name: str = Field(
+        default="llm-lab-seeds",
+        description="Name of the Hub bucket that receives the local seed files of a recipe. "
+        "The bucket is in the namespace of the dataset.",
+        examples=["llm-lab-seeds"],
+    )
     artifacts_dir: Path = Field(
         default=Path(".llm-lab/artifacts"),
         description="Directory where Data Designer writes the generated datasets.",
@@ -125,7 +132,12 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        return init_settings, env_settings, KeyringSettingsSource(settings_cls)
+        return (
+            init_settings,
+            env_settings,
+            SecretSettingsSource(settings_cls, lambda entry: os.environ.get(entry.username)),
+            SecretSettingsSource(settings_cls, read_keyring_password),
+        )
 
     @cached_property
     def database_engine(self) -> Engine:

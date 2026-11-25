@@ -7,10 +7,13 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from data_designer.config.seed import SamplingStrategy, SeedConfig
 
 from llm_lab.datasets.designer import DataDesignerRunner
 from llm_lab.datasets.recipe import Recipe, parse_recipe
 from llm_lab.errors import CommandError
+from llm_lab.keyring_settings import SecretName
+from llm_lab.secrets import SettingsSecretSource
 from llm_lab.settings import Settings
 from tests.conftest import build_model_config, build_recipe_source
 
@@ -90,3 +93,43 @@ def test_create_generates_the_rows_with_the_served_model(
     actual = (directory.parent, len(dataset), set(dataset["sentence"].tolist()), set(chat_server.models))
     expected = (tmp_path / "artifacts", 4, {"A generated sentence."}, {"Qwen/Qwen3-8B"})
     assert actual == expected, f"Expected {expected}, got {actual}."
+
+
+def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Path) -> None:
+    seed = {"kind": "hub", "path": "buckets/lab/seeds/0a1b/*.parquet", "sampling_strategy": "shuffle"}
+    recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
+
+    actual = build_runner(tmp_path, 8000).build_config(recipe).get_seed_config()
+
+    expected = SeedConfig.model_validate(
+        {
+            "source": {"seed_type": "hf", "path": "buckets/lab/seeds/0a1b/*.parquet", "token": SecretName.hf_token},
+            "sampling_strategy": SamplingStrategy.SHUFFLE,
+        }
+    )
+    assert actual == expected, f"Expected {expected}, got {actual}."
+
+
+def test_designer_resolves_the_hub_token_that_a_job_receives(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_LAB_HF_TOKEN", raising=False)
+    monkeypatch.setenv(SecretName.hf_token, "hf_secret")
+
+    actual = SettingsSecretSource(Settings()).resolve(SecretName.hf_token)
+
+    assert actual == "hf_secret", f"Expected the token from HF_TOKEN, got {actual!r}."
+
+
+def test_create_generates_one_row_for_each_local_seed_row(tmp_path: Path, chat_server: ChatServer) -> None:
+    seeds = tmp_path / "topics.parquet"
+    pd.DataFrame({"season": ["winter", "summer"]}).to_parquet(seeds)
+    source = build_recipe_source(
+        [build_model_config("writer")],
+        prompt="Write one sentence about {{ topic }} in {{ season }}.",
+        seed={"kind": "local", "path": str(seeds)},
+    )
+
+    directory = build_runner(tmp_path, chat_server.port).create(parse_recipe(source), "sentences", 4)
+
+    dataset = pd.read_parquet(directory / "parquet-files")
+    actual = dataset["season"].tolist()
+    assert actual == ["winter", "summer", "winter", "summer"], f"Expected the seed rows in order, got {actual}."

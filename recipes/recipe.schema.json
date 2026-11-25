@@ -1443,6 +1443,47 @@
       "title": "GenerationStrategy",
       "type": "string"
     },
+    "HubSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "sampling_strategy": {
+          "$ref": "#/$defs/SamplingStrategy",
+          "default": "ordered"
+        },
+        "selection_strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRange"
+            },
+            {
+              "$ref": "#/$defs/PartitionBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selection Strategy"
+        },
+        "kind": {
+          "const": "hub",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Seed files on the Hub, such as buckets/<namespace>/<bucket>/seeds/*.parquet or datasets/<namespace>/<dataset>/data/*.parquet.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "title": "HubSeed",
+      "type": "object"
+    },
     "HuggingFaceSeedSource": {
       "properties": {
         "seed_type": {
@@ -2399,6 +2440,47 @@
         "path"
       ],
       "title": "LocalFileSeedSource",
+      "type": "object"
+    },
+    "LocalSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "sampling_strategy": {
+          "$ref": "#/$defs/SamplingStrategy",
+          "default": "ordered"
+        },
+        "selection_strategy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRange"
+            },
+            {
+              "$ref": "#/$defs/PartitionBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selection Strategy"
+        },
+        "kind": {
+          "const": "local",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Seed file, or a wildcard such as seeds/*.parquet, relative to the current folder. A job reads a copy that llm-lab uploads to a Hub bucket.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "title": "LocalSeed",
       "type": "object"
     },
     "ManualDistribution": {
@@ -4003,6 +4085,32 @@
       },
       "title": "Vllm Args",
       "type": "array"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "discriminator": {
+            "mapping": {
+              "hub": "#/$defs/HubSeed",
+              "local": "#/$defs/LocalSeed"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LocalSeed"
+            },
+            {
+              "$ref": "#/$defs/HubSeed"
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
     },
     "data_designer": {
       "$ref": "#/$defs/DataDesignerConfig"

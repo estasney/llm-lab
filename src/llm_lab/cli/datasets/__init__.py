@@ -5,12 +5,11 @@ from typing import Annotated, assert_never
 import typer
 from pydantic.json_schema import GenerateJsonSchema
 
-from llm_lab.cli.datasets.deps import DatasetDesignerDep, DatasetHubDep, ModelServerDep
+from llm_lab.cli.datasets.deps import DatasetDesignerDep, DatasetHubDep, ModelServerDep, SeedStoreDep
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs import report
 from llm_lab.cli.jobs.deps import JobOrchestratorDep
 from llm_lab.cli.yaml_files import reading_yaml_file
-from llm_lab.datasets.designer import DatasetDesigner
 from llm_lab.datasets.hub import (
     DatasetHub,
     EmptyRepository,
@@ -19,7 +18,7 @@ from llm_lab.datasets.hub import (
     StoredDataset,
     parse_hub_dataset,
 )
-from llm_lab.datasets.job import build_dataset_job
+from llm_lab.datasets.job import build_dataset_job, prepare_job_recipe
 from llm_lab.datasets.recipe import Recipe, RecipeFile, parse_recipe
 from llm_lab.errors import CommandError
 from llm_lab.settings import SettingsDep
@@ -39,8 +38,7 @@ def load_recipe(path: Path) -> Recipe:
         return parse_recipe(path.read_text())
 
 
-def check_dataset(recipe: Recipe, dataset: HubDataset, designer: DatasetDesigner, hub: DatasetHub) -> HubRepository:
-    designer.validate(recipe)
+def check_dataset(recipe: Recipe, dataset: HubDataset, hub: DatasetHub) -> HubRepository:
     repository = hub.read(dataset)
     match repository:
         case StoredDataset(recipe_source=source):
@@ -66,13 +64,16 @@ def submit_dataset(
     settings: SettingsDep,
     designer: DatasetDesignerDep,
     hub: DatasetHubDep,
+    seeds: SeedStoreDep,
     orchestrator: JobOrchestratorDep,
 ) -> None:
     if settings.datasets_image is None:
         raise CommandError("The datasets image is not set. Set the environment variable LLM_LAB_DATASETS_IMAGE.")
     recipe = load_recipe(recipe_path)
-    check_dataset(recipe, dataset, designer, hub)
-    report(orchestrator.submit(build_dataset_job(recipe, dataset, rows, settings.datasets_image)))
+    designer.validate(recipe)
+    job_recipe = prepare_job_recipe(recipe, dataset, seeds)
+    check_dataset(job_recipe, dataset, hub)
+    report(orchestrator.submit(build_dataset_job(job_recipe, dataset, rows, settings.datasets_image)))
 
 
 @app.command("create", help="Serve the model of a recipe with vLLM, generate the dataset and upload it to the Hub.")
@@ -85,7 +86,8 @@ def create_dataset(
     hub: DatasetHubDep,
 ) -> None:
     recipe = load_recipe(recipe_path)
-    repository = check_dataset(recipe, dataset, designer, hub)
+    designer.validate(recipe)
+    repository = check_dataset(recipe, dataset, hub)
     with server.serve(recipe):
         directory = designer.create(recipe, dataset.name, rows)
     typer.echo(hub.publish(dataset, repository, directory, recipe))

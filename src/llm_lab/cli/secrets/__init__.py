@@ -6,8 +6,8 @@ from keyring.errors import NoKeyringError
 
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.errors import CommandError
-from llm_lab.jobs.secrets import find_secret_entry
 from llm_lab.keyring_settings import SecretName
+from llm_lab.secrets import find_secret_entry
 
 app = DependentTyper(name="secrets", no_args_is_help=True, help="Manage keyring secrets.")
 

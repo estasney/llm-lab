@@ -37,10 +37,10 @@ from llm_lab.jobs.protocol import (
     Running,
     Succeeded,
 )
-from llm_lab.jobs.secrets import SettingsSecretSource
 from llm_lab.jobs.tables import Base, JobTransitionRow
 from llm_lab.jobs.vast import VastInstanceProvider, build_offer_query
 from llm_lab.keyring_settings import SecretName
+from llm_lab.secrets import SettingsSecretSource
 from llm_lab.settings import Settings, get_settings
 
 

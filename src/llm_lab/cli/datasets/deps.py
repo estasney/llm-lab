@@ -2,6 +2,7 @@ from typing import Annotated
 
 from llm_lab.datasets.designer import DataDesignerRunner, DatasetDesigner
 from llm_lab.datasets.hub import DatasetHub, HuggingFaceHub
+from llm_lab.datasets.seeds import HuggingFaceSeedStore, SeedStore
 from llm_lab.datasets.serving import ModelServer, VllmServer
 from llm_lab.dependencies import Depends
 from llm_lab.settings import SettingsDep
@@ -26,3 +27,10 @@ def get_dataset_hub(settings: SettingsDep) -> DatasetHub:
 
 
 type DatasetHubDep = Annotated[DatasetHub, Depends(get_dataset_hub)]
+
+
+def get_seed_store(settings: SettingsDep) -> SeedStore:
+    return HuggingFaceSeedStore(settings)
+
+
+type SeedStoreDep = Annotated[SeedStore, Depends(get_seed_store)]
