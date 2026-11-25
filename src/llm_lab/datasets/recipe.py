@@ -55,6 +55,11 @@ class RecipeFile(BaseModel):
     job: RecipeJob
     vllm_args: tuple[str, ...] = ()
     seed: Annotated[LocalSeed | HubSeed, Field(discriminator="kind")] | None = None
+    rows_per_batch: PositiveInt | None = Field(
+        default=None,
+        description="Rows that Data Designer generates and writes to disk as one batch. "
+        "Data Designer uses its own default when this is not set.",
+    )
     data_designer: DataDesignerConfig
 
     @field_validator("data_designer")
@@ -71,6 +76,7 @@ class Recipe:
     job: RecipeJob
     vllm_args: tuple[str, ...]
     seed: LocalSeed | HubSeed | None
+    rows_per_batch: int | None
     data_designer: DataDesignerConfig
     served_model: str
     provider_name: str
@@ -89,6 +95,7 @@ def parse_recipe(source: str) -> Recipe:
                 job=recipe_file.job,
                 vllm_args=recipe_file.vllm_args,
                 seed=recipe_file.seed,
+                rows_per_batch=recipe_file.rows_per_batch,
                 data_designer=recipe_file.data_designer,
                 served_model=served_model,
                 provider_name=provider_name,

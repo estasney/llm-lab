@@ -17,6 +17,11 @@ vllm_args:
   - "16384"
   - --reasoning-parser
   - qwen3
+  - --kv-cache-dtype
+  - fp8
+  - --language-model-only
+
+rows_per_batch: 100
 
 data_designer:
   model_configs:
@@ -24,7 +29,7 @@ data_designer:
       model: Qwen/Qwen3.8-27B-FP8
       provider: vllm
       inference_parameters:
-        max_parallel_requests: 32
+        max_parallel_requests: 24
         max_tokens: 8192
         timeout: 600
         temperature: 1.0
@@ -38,7 +43,7 @@ data_designer:
       model: Qwen/Qwen3.8-27B-FP8
       provider: vllm
       inference_parameters:
-        max_parallel_requests: 32
+        max_parallel_requests: 24
         max_tokens: 2048
         timeout: 600
         temperature: 0.7
