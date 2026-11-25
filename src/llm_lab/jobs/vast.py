@@ -95,6 +95,7 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
         **{field: {"lte": ceiling} for field, ceiling in ceilings.items() if ceiling is not None},
         **location,
         **({"datacenter": {"eq": True}} if request.datacenter_only else {}),
+        **({} if request.min_duration_hours is None else {"duration": {"gte": request.min_duration_hours * 3600}}),
         "cuda_max_good": {"gte": request.min_cuda},
         "gpu_name": {"eq": request.gpu_name},
         "num_gpus": {"eq": request.gpu_count},

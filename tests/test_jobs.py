@@ -664,8 +664,9 @@ def test_offer_query_filters_on_cuda_13_unless_the_request_sets_another_floor() 
         ({"countries": {"include": ["US", "CA"]}}, {"geolocation": {"in": ["US", "CA"]}}),
         ({"countries": {"exclude": ["CN"]}}, {"geolocation": {"notin": ["CN"]}}),
         ({"datacenter_only": True}, {"datacenter": {"eq": True}}),
+        ({"min_duration_hours": 48}, {"duration": {"gte": 172800}}),
     ],
-    ids=["no-filters", "price-parts", "include-countries", "exclude-countries", "datacenter-only"],
+    ids=["no-filters", "price-parts", "include-countries", "exclude-countries", "datacenter-only", "min-duration"],
 )
 def test_offer_query_adds_a_clause_for_each_optional_filter_of_the_request(
     update: dict[str, object], expected: dict[str, object]

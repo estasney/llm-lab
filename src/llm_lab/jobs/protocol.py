@@ -53,6 +53,7 @@ class ResourceRequest(BaseModel):
     max_upload_dollars_per_gb: PositiveFloat | None = None
     countries: IncludedCountries | ExcludedCountries | None = None
     datacenter_only: bool = False
+    min_duration_hours: PositiveFloat | None = None
     min_cuda: PositiveFloat = 13.0
 
 

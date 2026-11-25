@@ -2693,6 +2693,19 @@
           "title": "Datacenter Only",
           "type": "boolean"
         },
+        "min_duration_hours": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Duration Hours"
+        },
         "min_cuda": {
           "default": 13.0,
           "exclusiveMinimum": 0,

@@ -43,6 +43,7 @@ A `resources` placement can also set these optional filters:
 - `max_download_dollars_per_gb` and `max_upload_dollars_per_gb`: ceilings on the internet traffic prices, which Vast.ai bills on top of the hourly price.
 - `countries`: `include` or `exclude`, with a list of two-letter country codes.
 - `datacenter_only`: `true` to rent only datacenter hosts.
+- `min_duration_hours`: the minimum time that a host must stay available for rent.
 
 ## Image
 
