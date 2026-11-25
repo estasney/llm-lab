@@ -1,8 +1,12 @@
+import base64
 import json
+import os
+import shlex
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import assert_never
 
 import httpx
 import keyring
@@ -10,6 +14,7 @@ import pytest
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_ssh_private_key
 from keyring.backend import KeyringBackend
 from pydantic import SecretStr, ValidationError
 from sqlalchemy import Engine, select, text
@@ -17,9 +22,10 @@ from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from llm_lab.cli import app
-from llm_lab.cli.jobs.deps import get_http_client
+from llm_lab.cli.jobs.deps import get_artifact_downloader, get_http_client
 from llm_lab.database import build_migration_config
 from llm_lab.errors import CommandError
+from llm_lab.jobs.access import JobAccessStore, RsyncDownloader, SshEndpoint
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
@@ -53,6 +59,9 @@ class FakeVast:
     live_instances: dict[int, str] = field(default_factory=dict)
     rented_offers: list[int] = field(default_factory=list)
     requests: list[httpx.Request] = field(default_factory=list)
+    ports: dict[str, list[dict[str, str]]] = field(
+        default_factory=lambda: {"2222/tcp": [{"HostIp": "0.0.0.0", "HostPort": "41022"}]}
+    )
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -84,7 +93,16 @@ class FakeVast:
                     return failure()
                 if int(instance_id) not in self.live_instances:
                     return httpx.Response(404)
-                return httpx.Response(200, json={"instances": {"actual_status": next(self.actual_statuses)}})
+                return httpx.Response(
+                    200,
+                    json={
+                        "instances": {
+                            "actual_status": next(self.actual_statuses, "running"),
+                            "public_ipaddr": "203.0.113.5",
+                            "ports": self.ports,
+                        }
+                    },
+                )
             case "GET", ["api", "v1", "instances"]:
                 label = json.loads(request.url.params["select_filters"])["label"]["eq"]
                 matching = [{"id": instance_id} for instance_id, live in self.live_instances.items() if live == label]
@@ -124,12 +142,27 @@ class MemoryKeyring(KeyringBackend):
 
 
 @dataclass
+class FakeDownloader:
+    directory: Path
+    downloads: list[tuple[str, SshEndpoint, str]] = field(default_factory=list)
+    failure: CommandError | None = None
+
+    def download(self, job_name: str, endpoint: SshEndpoint, remote_directory: str) -> Path:
+        if self.failure is not None:
+            raise self.failure
+        self.downloads.append((job_name, endpoint, remote_directory))
+        return self.directory / job_name
+
+
+@dataclass
 class Workbench:
     vast: FakeVast
     engine: Engine
     provider: VastInstanceProvider
     orchestrator: JobOrchestrator
     sleeps: list[float]
+    access: JobAccessStore
+    downloader: FakeDownloader
 
 
 @pytest.fixture
@@ -141,7 +174,11 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
     keyring.set_password("llm-lab", "VAST_API_KEY", "secret-key")
     keyring.set_password("llm-lab", "HF_TOKEN", "hf-secret-value")
     monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "jobs.sqlite3"))
+    monkeypatch.setenv("LLM_LAB_JOB_ACCESS_DIR", str(tmp_path / "access"))
+    monkeypatch.setenv("LLM_LAB_JOB_DOWNLOADS_DIR", str(tmp_path / "downloads"))
     settings = Settings()
+    access = JobAccessStore(settings)
+    downloader = FakeDownloader(settings.job_downloads_dir)
     engine = settings.database_engine
     command.upgrade(build_migration_config(engine), "head")
     session = Session(engine)
@@ -154,8 +191,10 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
         vast,
         engine,
         provider,
-        JobOrchestrator(provider, session, SettingsSecretSource(settings), SteppingClock().read),
+        JobOrchestrator(provider, session, SettingsSecretSource(settings), access, downloader, SteppingClock().read),
         sleeps,
+        access,
+        downloader,
     )
     session.close()
     engine.dispose()
@@ -204,6 +243,16 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
     search, rent = (json.loads(request.content) for request in workbench.vast.requests)
     assert search["gpu_name"] == {"eq": "RTX 4090"}
     assert search["dph_total"] == {"lte": 1.0}
+    assert search["direct_port_count"] == {"gte": 1}
+    environment = rent.pop("env")
+    assert environment.keys() == {
+        "SEED",
+        "HF_TOKEN",
+        "LLM_LAB_SSH_AUTHORIZED_KEY",
+        "LLM_LAB_SSH_HOST_KEY",
+        "-p 2222:2222",
+    }
+    assert (environment["SEED"], environment["HF_TOKEN"], environment["-p 2222:2222"]) == ("1", "hf-secret-value", "1")
     assert rent == {
         "client_id": "me",
         "image": "ghcr.io/example/train:1",
@@ -213,6 +262,15 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
         "args": [
             "sh",
             "-c",
+            "if command -v sshd >/dev/null 2>&1; then\n"
+            "mkdir -p -m 700 /run/sshd /root/.ssh\n"
+            "mkdir -p /etc/profile.d\n"
+            "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /root/.ssh/authorized_keys\n"
+            "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)\n"
+            'printf \'export PATH="%s"\\n\' "$PATH" > /etc/profile.d/llm-lab-path.sh\n'
+            '"$(command -v sshd)" -p 2222 -h /run/sshd/llm-lab-host-key -o PasswordAuthentication=no '
+            "-o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password\n"
+            "fi\n"
             "if [ ! -e /llm-lab-job-done ]; then\n"
             "python train.py --note 'two words'\n"
             "exit_code=$?\n"
@@ -223,7 +281,6 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
             'curl -fsS -X DELETE -H "Authorization: Bearer $CONTAINER_API_KEY" '
             '"https://console.vast.ai/api/v0/instances/$CONTAINER_ID/"',
         ],
-        "env": {"SEED": "1", "HF_TOKEN": "hf-secret-value"},
     }
     assert "hf-secret-value" not in record.model_dump_json()
     with workbench.engine.connect() as connection:
@@ -443,12 +500,13 @@ def test_abandon_destroys_each_instance_of_the_job_and_records_the_job_as_aborte
     workbench.orchestrator.submit(build_spec())
     workbench.vast.live_instances |= {502: "llm-lab-job-train", 503: "llm-lab-job-other"}
 
-    record = workbench.orchestrator.abandon("train")
+    abandonment = workbench.orchestrator.abandon("train", download=True)
 
-    assert isinstance(record.status, Aborted)
-    assert workbench.orchestrator.read("train") == record
+    assert isinstance(abandonment.record.status, Aborted)
+    assert workbench.orchestrator.read("train") == abandonment.record
     assert workbench.vast.live_instances == {503: "llm-lab-job-other"}
-    assert workbench.orchestrator.abandon("train") == record
+    assert abandonment.downloaded_to is None, "Expected no download for a job without an artifacts directory."
+    assert workbench.orchestrator.abandon("train", download=True).record == abandonment.record
 
 
 def test_settings_read_a_keyring_entry_only_for_a_field_with_the_annotation(workbench: Workbench) -> None:
@@ -557,7 +615,7 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
     submit_code, submit_output = invoke("submit", str(manifest))
     assert submit_code == 0
     assert "wandb-secret-value" not in submit_output
-    assert json.loads(workbench.vast.requests[-1].content)["env"] == {"HF_TOKEN": "wandb-secret-value"}
+    assert json.loads(workbench.vast.requests[-1].content)["env"]["HF_TOKEN"] == "wandb-secret-value"
     assert invoke("list") == (0, "train\trunning\n")
     status_code, status_output = invoke("status", "train")
     condition = "succeeded" if status_exit_code == 0 else "failed"
@@ -582,3 +640,163 @@ def test_offer_query_filters_on_cuda_13_unless_the_request_sets_another_floor() 
 
     expected = [{"gte": 13.0}, {"gte": 13.2}]
     assert actual == expected, f"Expected the CUDA filters {expected}, got {actual}."
+
+
+def build_spec_with_artifacts() -> JobSpec:
+    return build_spec().model_copy(update={"artifacts_directory": "/workspace/artifacts"})
+
+
+def test_instance_receives_the_public_half_of_the_local_identity_and_the_private_half_of_the_pinned_host_key(
+    workbench: Workbench,
+) -> None:
+    workbench.orchestrator.submit(build_spec())
+
+    environment = json.loads(workbench.vast.requests[-1].content)["env"]
+    directory = workbench.access.directory / "train"
+    identity = load_ssh_private_key((directory / "id_ed25519").read_bytes(), password=None)
+    host_key = load_ssh_private_key(base64.b64decode(environment["LLM_LAB_SSH_HOST_KEY"]), password=None)
+    actual = (
+        environment["LLM_LAB_SSH_AUTHORIZED_KEY"],
+        (directory / "known_hosts").read_text(),
+        (directory / "id_ed25519").stat().st_mode & 0o777,
+    )
+    expected = (
+        identity.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode(),
+        f"llm-lab-train {host_key.public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode()}\n",
+        0o600,
+    )
+    assert actual == expected, f"Expected the identity, the pinned host key and the file mode {expected}, got {actual}."
+
+
+def test_abandon_downloads_the_artifacts_directory_and_then_destroys_the_instance(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec_with_artifacts())
+
+    abandonment = workbench.orchestrator.abandon("train", download=True)
+
+    assert workbench.downloader.downloads == [("train", SshEndpoint("203.0.113.5", 41022), "/workspace/artifacts")]
+    assert abandonment.downloaded_to == workbench.downloader.directory / "train"
+    assert isinstance(abandonment.record.status, Aborted)
+    assert workbench.vast.live_instances == {}
+    assert not (workbench.access.directory / "train").exists(), "Expected the throwaway keys to be removed."
+
+
+def test_abandon_keeps_the_job_running_when_the_download_fails(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec_with_artifacts())
+    workbench.downloader.failure = CommandError("rsync exited with status 12")
+
+    with pytest.raises(CommandError, match="status 12"):
+        workbench.orchestrator.abandon("train", download=True)
+
+    assert isinstance(workbench.orchestrator.read("train").status, Running)
+    assert workbench.vast.live_instances == {9000: "llm-lab-job-train"}
+    assert (workbench.access.directory / "train").exists(), "Expected the keys to stay for another attempt."
+
+
+def test_abandon_without_download_destroys_the_instance_at_once(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec_with_artifacts())
+
+    abandonment = workbench.orchestrator.abandon("train", download=False)
+
+    assert (workbench.downloader.downloads, abandonment.downloaded_to, workbench.vast.live_instances) == ([], None, {})
+
+
+def test_throwaway_keys_are_removed_when_the_job_finishes_or_no_offer_is_available(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec())
+    workbench.vast.actual_statuses = iter(["running"])
+    workbench.orchestrator.sync("train")
+    finished_keys = (workbench.access.directory / "train").exists()
+    workbench.vast.offers = []
+    workbench.orchestrator.submit(build_spec())
+
+    assert (finished_keys, (workbench.access.directory / "train").exists()) == (False, False)
+
+
+def test_ssh_endpoint_is_rejected_when_the_instance_does_not_map_the_ssh_port(workbench: Workbench) -> None:
+    workbench.orchestrator.submit(build_spec())
+    workbench.vast.ports = {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "40080"}]}
+
+    with pytest.raises(CommandError, match="SSH port 2222"):
+        workbench.orchestrator.find_ssh_endpoint("train")
+
+
+def test_cli_opens_a_shell_with_the_throwaway_key_and_destroy_reports_the_download(
+    workbench: Workbench, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workbench.orchestrator.submit(build_spec_with_artifacts())
+    executed: list[list[str]] = []
+
+    def record_execution(file: str, arguments: list[str]) -> None:
+        executed.append([file, *arguments])
+
+    monkeypatch.setattr(os, "execvp", record_execution)
+    overridden = app.with_dependency_overrides(
+        {
+            get_http_client: lambda: httpx.Client(transport=httpx.MockTransport(workbench.vast.handle)),
+            get_artifact_downloader: lambda: workbench.downloader,
+        }
+    )
+
+    ssh = CliRunner().invoke(overridden, ["jobs", "ssh", "train"], catch_exceptions=False)
+    destroy = CliRunner().invoke(overridden, ["jobs", "destroy", "train"], catch_exceptions=False)
+
+    directory = workbench.access.directory / "train"
+    assert ssh.exit_code == 0
+    assert executed == [
+        [
+            "ssh",
+            "ssh",
+            "-p",
+            "41022",
+            "-i",
+            str(directory / "id_ed25519"),
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            f"UserKnownHostsFile={directory / 'known_hosts'}",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "HostKeyAlias=llm-lab-train",
+            "-l",
+            "root",
+            "203.0.113.5",
+        ]
+    ]
+    assert destroy.exit_code == 1, "Expected the exit code of an aborted job."
+    assert f"Downloaded the artifacts of job train to {workbench.downloader.directory / 'train'}." in destroy.output
+    assert workbench.vast.live_instances == {}
+
+
+@pytest.mark.parametrize(("status", "expected_error"), [(0, None), (12, "rsync exited with status 12")])
+def test_rsync_downloader_copies_the_remote_directory_through_the_job_ssh_command(
+    tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch, status: int, expected_error: str | None
+) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    recorded = tmp_path / "rsync-arguments"
+    (tools / "rsync").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {recorded}\nexit {status}\n')
+    (tools / "rsync").chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools))
+    workbench.access.create("train")
+    downloader = RsyncDownloader(Settings(), workbench.access)
+    endpoint = SshEndpoint("203.0.113.5", 41022)
+
+    match expected_error:
+        case None:
+            assert downloader.download("train", endpoint, "/workspace/artifacts") == tmp_path / "downloads" / "train"
+        case str():
+            with pytest.raises(CommandError, match=expected_error):
+                downloader.download("train", endpoint, "/workspace/artifacts")
+        case _:
+            assert_never(expected_error)
+
+    *ssh, host = workbench.access.build_ssh_command("train", endpoint)
+    expected = [
+        "--archive",
+        "--partial",
+        "--rsh",
+        shlex.join(ssh),
+        f"{host}:/workspace/artifacts/",
+        f"{tmp_path / 'downloads' / 'train'}/",
+    ]
+    assert recorded.read_text().splitlines() == expected

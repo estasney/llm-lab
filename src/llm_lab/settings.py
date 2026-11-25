@@ -70,6 +70,21 @@ class Settings(BaseSettings):
         description="Number of last log lines that are read from an instance to find the exit code of the job.",
         examples=[200],
     )
+    vast_ssh_port: PositiveInt = Field(
+        default=2222,
+        description="Port of the SSH server in the container of a job. Vast.ai maps it to a public port.",
+        examples=[2222],
+    )
+    job_access_dir: Path = Field(
+        default=Path(".llm-lab/access"),
+        description="Directory that holds the throwaway SSH key and the pinned host key of each running job.",
+        examples=[".llm-lab/access"],
+    )
+    job_downloads_dir: Path = Field(
+        default=Path(".llm-lab/downloads"),
+        description="Directory where `llm-lab jobs destroy` puts the files that it downloads from each job.",
+        examples=[".llm-lab/downloads"],
+    )
     datasets_image: str | None = Field(
         default=None,
         description="Reference of the published datasets image that a dataset job runs.",

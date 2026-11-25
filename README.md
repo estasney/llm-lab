@@ -8,6 +8,15 @@ llm-lab generates synthetic datasets with [NeMo Data Designer](https://github.co
 2. The job runs the datasets image. The image runs `llm-lab datasets create`, which serves the model of the recipe with vLLM, generates the rows with Data Designer, and uploads the dataset to a private Hub repository.
 3. The job writes its exit code to the instance log. Run `llm-lab jobs status <dataset name>` to record the result and destroy the instance. If you do not, the instance destroys itself after `ttl_seconds_after_finished`.
 
+## Stopping a job and SSH access
+
+Each job gets a throwaway SSH key pair and a throwaway host key when you submit it. The instance receives the public half of your key and the private half of its host key. Your machine keeps the private key and pins the host key under `.llm-lab/access/<job name>`, and llm-lab deletes them when the job finishes. The container runs `sshd` on port 2222, and Vast.ai maps that port to a public port, so a job rents only offers that have direct ports.
+
+- `llm-lab jobs ssh <name>` opens a shell on the instance of a running job.
+- `llm-lab jobs destroy <name>` first downloads the artifacts directory of the job with rsync to `.llm-lab/downloads/<name>`, then destroys the instance. If the download fails, the instance keeps running. Add `--no-download` to destroy the instance at once.
+
+Data Designer writes rows to disk in groups of 1,000, so a download gets only the finished groups. Your machine needs `ssh` and `rsync`.
+
 ## Recipes
 
 A recipe is a YAML file in `recipes/`. Git tracks the recipes. The Hub repository of each dataset also holds a copy of the recipe as `recipe.yaml`.
