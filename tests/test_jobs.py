@@ -263,12 +263,13 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
             "sh",
             "-c",
             "if command -v sshd >/dev/null 2>&1; then\n"
-            "mkdir -p -m 700 /run/sshd /root/.ssh\n"
+            "mkdir -p -m 700 /run/sshd\n"
             "mkdir -p /etc/profile.d\n"
-            "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /root/.ssh/authorized_keys\n"
+            "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /run/sshd/llm-lab-authorized-keys\n"
             "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)\n"
             'printf \'export PATH="%s"\\n\' "$PATH" > /etc/profile.d/llm-lab-path.sh\n'
-            '"$(command -v sshd)" -p 2222 -h /run/sshd/llm-lab-host-key -o PasswordAuthentication=no '
+            '"$(command -v sshd)" -p 2222 -h /run/sshd/llm-lab-host-key '
+            "-o AuthorizedKeysFile=/run/sshd/llm-lab-authorized-keys -o PasswordAuthentication=no "
             "-o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password\n"
             "fi\n"
             "if [ ! -e /llm-lab-job-done ]; then\n"
