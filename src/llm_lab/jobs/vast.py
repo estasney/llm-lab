@@ -1,3 +1,4 @@
+import base64
 import json
 import re
 import shlex
@@ -5,9 +6,10 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import assert_never
 
 import httpx
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 from llm_lab.errors import CommandError
+from llm_lab.jobs.access import InstanceAccess, SshEndpoint
 from llm_lab.jobs.protocol import Active, Completed, ExplicitOffer, Halted, JobSpec, ResourceRequest
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings
@@ -32,6 +34,19 @@ class InstanceView(BaseModel):
 
 class InstanceEnvelope(BaseModel):
     instances: InstanceView | None
+
+
+class PortBinding(BaseModel):
+    host_port: int = Field(alias="HostPort")
+
+
+class InstanceAddress(BaseModel):
+    public_ipaddr: str
+    ports: dict[str, list[PortBinding]]
+
+
+class AddressEnvelope(BaseModel):
+    instances: InstanceAddress
 
 
 class InstanceIdentity(BaseModel):
@@ -62,6 +77,7 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
         "external": {"eq": False},
         "rentable": {"eq": True},
         "rented": {"eq": False},
+        "direct_port_count": {"gte": 1},
         "allocated_storage": disk_gb,
         "type": "ondemand",
         "order": [["dph_total", "asc"]],
@@ -69,9 +85,20 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
     }
 
 
-def build_instance_request(spec: JobSpec, secrets: Mapping[SecretName, SecretStr], api_url: str) -> dict[str, object]:
+def build_instance_request(
+    spec: JobSpec, secrets: Mapping[SecretName, SecretStr], access: InstanceAccess, api_url: str, ssh_port: int
+) -> dict[str, object]:
     script = "\n".join(
         [
+            "if command -v sshd >/dev/null 2>&1; then",
+            "mkdir -p -m 700 /run/sshd /root/.ssh",
+            "mkdir -p /etc/profile.d",
+            "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /root/.ssh/authorized_keys",
+            "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)",
+            'printf \'export PATH="%s"\\n\' "$PATH" > /etc/profile.d/llm-lab-path.sh',
+            f'"$(command -v sshd)" -p {ssh_port} -h /run/sshd/llm-lab-host-key '
+            "-o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password",
+            "fi",
             "if [ ! -e /llm-lab-job-done ]; then",
             shlex.join(spec.command),
             "exit_code=$?",
@@ -90,7 +117,13 @@ def build_instance_request(spec: JobSpec, secrets: Mapping[SecretName, SecretStr
         "label": label_job(spec.name),
         "runtype": "args",
         "args": ["sh", "-c", script],
-        "env": {**spec.environment, **{name: secret.get_secret_value() for name, secret in secrets.items()}},
+        "env": {
+            **spec.environment,
+            **{name: secret.get_secret_value() for name, secret in secrets.items()},
+            "LLM_LAB_SSH_AUTHORIZED_KEY": access.authorized_key,
+            "LLM_LAB_SSH_HOST_KEY": base64.b64encode(access.host_private_key.get_secret_value().encode()).decode(),
+            f"-p {ssh_port}:{ssh_port}": "1",
+        },
     }
 
 
@@ -132,9 +165,13 @@ class VastInstanceProvider:
             case _:
                 assert_never(spec.placement)
 
-    def rent_offer(self, offer_id: int, spec: JobSpec, secrets: Mapping[SecretName, SecretStr]) -> int | None:
+    def rent_offer(
+        self, offer_id: int, spec: JobSpec, secrets: Mapping[SecretName, SecretStr], access: InstanceAccess
+    ) -> int | None:
         response = self.call_api(
-            "PUT", f"/v0/asks/{offer_id}/", build_instance_request(spec, secrets, self.settings.vast_api_url)
+            "PUT",
+            f"/v0/asks/{offer_id}/",
+            build_instance_request(spec, secrets, access, self.settings.vast_api_url, self.settings.vast_ssh_port),
         )
         if response.status_code in {404, 410}:
             return None
@@ -162,6 +199,18 @@ class VastInstanceProvider:
                 return classify(actual_status, self.download_reported_exit_code(requested))
             case _:
                 return classify(view.actual_status, None)
+
+    def find_ssh_endpoint(self, instance_id: int) -> SshEndpoint:
+        response = self.call_api("GET", f"/v0/instances/{instance_id}/", None)
+        self.require_success(response)
+        address = AddressEnvelope.model_validate_json(response.content).instances
+        match address.ports.get(f"{self.settings.vast_ssh_port}/tcp", []):
+            case [binding, *_]:
+                return SshEndpoint(host=address.public_ipaddr, port=binding.host_port)
+            case _:
+                raise CommandError(
+                    f"Instance {instance_id} does not map the SSH port {self.settings.vast_ssh_port} to a public port."
+                )
 
     def find_instances(self, job_name: str) -> Sequence[int]:
         params = {

@@ -939,6 +939,7 @@ version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "cryptography" },
     { name = "data-designer" },
     { name = "datasets" },
     { name = "httpx" },
@@ -964,6 +965,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.20.1" },
+    { name = "cryptography", specifier = ">=50.0.2" },
     { name = "data-designer", specifier = ">=1.0.1" },
     { name = "datasets", specifier = ">=5.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },

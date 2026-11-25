@@ -144,13 +144,16 @@ def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(recipe: R
         "sentences",
         "ghcr.io/lab/datasets:1",
         ("llm-lab-dataset-job", "--dataset", "lab/sentences", "--rows", "4"),
-        {"LLM_LAB_RECIPE"},
+        {"LLM_LAB_RECIPE", "LLM_LAB_ARTIFACTS_DIR"},
         (SecretName.hf_token,),
         120,
     )
     assert actual == expected, f"Expected {expected}, got {actual}."
     assert (spec.ttl_seconds_after_finished, spec.placement) == (600, recipe.job.placement), "Expected the recipe job."
     assert decoded == recipe.source, "Expected the job to carry the recipe file unchanged."
+    assert spec.artifacts_directory == spec.environment["LLM_LAB_ARTIFACTS_DIR"], (
+        "Expected destroy to download the directory where Data Designer writes."
+    )
 
 
 def test_committed_recipe_schema_matches_the_schema_command() -> None:

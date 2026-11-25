@@ -1,3 +1,4 @@
+import os
 from datetime import UTC
 from pathlib import Path
 from typing import Annotated, assert_never
@@ -8,7 +9,7 @@ from sqlalchemy import select
 
 from llm_lab.cli.db.deps import DatabaseSessionDep
 from llm_lab.cli.dependent_typer import DependentTyper
-from llm_lab.cli.jobs.deps import JobOrchestratorDep
+from llm_lab.cli.jobs.deps import JobAccessStoreDep, JobOrchestratorDep
 from llm_lab.cli.yaml_files import reading_yaml_file
 from llm_lab.jobs.protocol import Aborted, Failed, JobRecord, JobSpec, Pending, Running, Succeeded
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
@@ -90,6 +91,29 @@ def show_job_history(name: JobNameArgument, session: DatabaseSessionDep) -> None
         typer.echo(f"{row.recorded_at.replace(tzinfo=UTC).isoformat()}\t{status.model_dump_json()}")
 
 
+type DownloadOption = Annotated[
+    bool,
+    typer.Option(
+        "--download/--no-download",
+        help="Download the artifacts directory of a running job before its instance is destroyed.",
+    ),
+]
+
+
 @app.command("destroy", help="Destroy the instances of a job.")
-def destroy_job(name: JobNameArgument, orchestrator: JobOrchestratorDep) -> None:
-    report(orchestrator.abandon(name))
+def destroy_job(name: JobNameArgument, orchestrator: JobOrchestratorDep, *, download: DownloadOption = True) -> None:
+    abandonment = orchestrator.abandon(name, download=download)
+    match abandonment.downloaded_to:
+        case Path() as directory:
+            typer.echo(f"Downloaded the artifacts of job {name} to {directory}.", err=True)
+        case None:
+            pass
+        case _:
+            assert_never(abandonment.downloaded_to)
+    report(abandonment.record)
+
+
+@app.command("ssh", help="Open a shell on the instance of a running job.")
+def open_job_shell(name: JobNameArgument, orchestrator: JobOrchestratorDep, access: JobAccessStoreDep) -> None:
+    command = access.build_ssh_command(name, orchestrator.find_ssh_endpoint(name))
+    os.execvp(command[0], command)

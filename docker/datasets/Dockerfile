@@ -32,14 +32,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM ${PYTHON_IMAGE}
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl gcc libc6-dev \
- && rm -rf /var/lib/apt/lists/*
+ && apt-get install -y --no-install-recommends \
+    curl gcc libc6-dev \
+    openssh-server rsync tmux neovim htop nvtop less procps iproute2 lsof jq ncdu tree git bash-completion \
+ && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
+ && echo 'export LANG=C.UTF-8' > /etc/profile.d/llm-lab-locale.sh
 
 COPY --from=builder /opt/vllm /opt/vllm
 COPY --from=builder /opt/llm-lab/.venv /opt/llm-lab/.venv
 COPY --chmod=755 docker/datasets/dataset-job.sh /usr/local/bin/llm-lab-dataset-job
 
 ENV PATH=/opt/llm-lab/.venv/bin:/opt/vllm/bin:$PATH \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    LANG=C.UTF-8
 
 WORKDIR /workspace

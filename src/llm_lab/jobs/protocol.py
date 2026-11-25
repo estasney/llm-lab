@@ -54,6 +54,7 @@ class JobSpec(BaseModel):
     disk_gb: PositiveFloat
     ttl_seconds_after_finished: PositiveInt
     placement: Annotated[ResourceRequest | ExplicitOffer, Field(discriminator="kind")]
+    artifacts_directory: Annotated[str, Field(pattern=r"^/")] | None = None
 
     @model_validator(mode="after")
     def reject_names_in_both_environments(self) -> Self:
