@@ -99,10 +99,10 @@ data_designer:
       extract_reasoning_content: true
       drop: true
       system_prompt: |
-        You give the answer in the first sentence and stop when the point is made.
-        You do not write preambles, restate the question, add summaries or offer more help.
-        You keep every fact, step and caveat that the question needs.
-        You use lists and code blocks only when the content is a list or code.
+        Answer the question directly, then stop.
+        Keep: the answer, each step or value the user needs, code that the question asks for or that fixes the user's code, and caveats that change what the user should do.
+        Cut: greetings, restating the question, background the user did not ask for, more than one example, closing summaries, offers of more help, headings and emoji.
+        Put all code in fenced code blocks with a language tag.
       prompt: "{{ prompt }}"
 
     - name: completeness
@@ -125,7 +125,8 @@ data_designer:
         </long_answer>
 
         Decide if the short answer leaves out information that the user needs.
-        Content of the long answer that the user does not need is not missing information.
+        The user needs only these: the answer, each step or value the user needs, code that the message asks for or that fixes the user's code, and caveats that change what the user should do.
+        Content of the long answer that the user does not need is not missing information. Extra examples, background and depth are not missing information.
         Do not count preambles, restatements, summaries or offers of more help as missing.
       scores:
         - name: completeness
