@@ -90,6 +90,12 @@ class Settings(BaseSettings):
         description="Reference of the published datasets image that a dataset job runs.",
         examples=["ghcr.io/example/llm-lab-datasets:0.1.2"],
     )
+    seed_bucket_name: str = Field(
+        default="llm-lab-seeds",
+        description="Name of the Hub bucket that receives the local seed files of a recipe. "
+        "The bucket is in the namespace of the dataset.",
+        examples=["llm-lab-seeds"],
+    )
     artifacts_dir: Path = Field(
         default=Path(".llm-lab/artifacts"),
         description="Directory where Data Designer writes the generated datasets.",

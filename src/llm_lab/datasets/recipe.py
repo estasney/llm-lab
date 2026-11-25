@@ -1,8 +1,10 @@
 from dataclasses import dataclass
-from typing import Annotated, Self
+from typing import Annotated, Self, assert_never
 
 import yaml
 from data_designer.config.data_designer_config import DataDesignerConfig
+from data_designer.config.seed import SeedConfig
+from data_designer.config.seed_source import HuggingFaceSeedSource
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, PositiveInt
 
 from llm_lab.errors import CommandError
@@ -34,8 +36,16 @@ class Recipe:
     served_model: str
     provider_name: str
 
+
+@dataclass(frozen=True)
+class PortableRecipe:
+    recipe: Recipe
+
     def generates_rows_like(self, other: Self) -> bool:
-        return (self.data_designer, self.vllm_args) == (other.data_designer, other.vllm_args)
+        return (self.recipe.data_designer, self.recipe.vllm_args) == (
+            other.recipe.data_designer,
+            other.recipe.vllm_args,
+        )
 
 
 def parse_recipe(source: str) -> Recipe:
@@ -56,3 +66,14 @@ def parse_recipe(source: str) -> Recipe:
                 "The model configs of a recipe must name one model on one provider. "
                 f"They name the models {models} and the providers {providers}."
             )
+
+
+def parse_portable_recipe(source: str) -> PortableRecipe:
+    recipe = parse_recipe(source)
+    match recipe.data_designer.seed_config:
+        case None | SeedConfig(source=HuggingFaceSeedSource()):
+            return PortableRecipe(recipe)
+        case SeedConfig():
+            raise CommandError("A recipe that runs on another machine can read seeds only from an hf seed source.")
+        case _:
+            assert_never(recipe.data_designer.seed_config)

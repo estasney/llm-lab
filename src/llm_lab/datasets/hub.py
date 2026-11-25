@@ -8,13 +8,14 @@ from huggingface_hub import CommitOperationAdd, HfApi
 from huggingface_hub.errors import RepositoryNotFoundError
 from pydantic import BaseModel, ConfigDict, SecretStr, StringConstraints
 
-from llm_lab.datasets.recipe import Recipe
+from llm_lab.datasets.recipe import PortableRecipe
 from llm_lab.datasets.repository import (
     RepositoryFilePaths,
     RepositoryMetadata,
     plan_repository_files,
     read_generated_run,
 )
+from llm_lab.datasets.seeds import SeedUpload
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import JobName
 
@@ -58,7 +59,11 @@ type HubRepository = StoredDataset | EmptyRepository | None
 class DatasetHub(Protocol):
     def read(self, dataset: HubDataset) -> HubRepository: ...
 
-    def publish(self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: Recipe) -> str: ...
+    def publish(
+        self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: PortableRecipe
+    ) -> str: ...
+
+    def upload_seeds(self, upload: SeedUpload) -> None: ...
 
 
 class HuggingFaceHub:
@@ -88,7 +93,7 @@ class HuggingFaceHub:
             self.api.hf_hub_download(dataset.repo_id, filename, repo_type="dataset", revision=revision)
         ).read_text()
 
-    def publish(self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: Recipe) -> str:
+    def publish(self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: PortableRecipe) -> str:
         empty = RepositoryMetadata(actual_num_records=0, target_num_records=0, file_paths=RepositoryFilePaths(data=()))
         match repository:
             case StoredDataset(revision=revision, metadata=stored):
@@ -110,3 +115,12 @@ class HuggingFaceHub:
             parent_commit=revision,
         )
         return f"https://huggingface.co/datasets/{dataset.repo_id}"
+
+    def upload_seeds(self, upload: SeedUpload) -> None:
+        self.api.create_bucket(upload.bucket_id, private=True, exist_ok=True)
+        stored = {file.path for file in self.api.get_bucket_paths_info(upload.bucket_id, upload.files)}
+        missing: list[tuple[str | Path | bytes, str]] = [
+            (path, name) for name, path in upload.files.items() if name not in stored
+        ]
+        if missing:
+            self.api.batch_bucket_files(upload.bucket_id, add=missing)

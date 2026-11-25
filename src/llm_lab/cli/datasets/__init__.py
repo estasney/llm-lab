@@ -20,9 +20,10 @@ from llm_lab.datasets.hub import (
     parse_hub_dataset,
 )
 from llm_lab.datasets.job import build_dataset_job
-from llm_lab.datasets.recipe import Recipe, RecipeFile, parse_recipe
+from llm_lab.datasets.recipe import PortableRecipe, Recipe, RecipeFile, parse_portable_recipe, parse_recipe
+from llm_lab.datasets.seeds import plan_seed_upload
 from llm_lab.errors import CommandError
-from llm_lab.settings import SettingsDep
+from llm_lab.settings import Settings, SettingsDep
 
 app = DependentTyper(name="datasets", no_args_is_help=True, help="Create datasets from recipes.")
 
@@ -39,14 +40,18 @@ def load_recipe(path: Path) -> Recipe:
         return parse_recipe(path.read_text())
 
 
-def check_dataset(recipe: Recipe, dataset: HubDataset, designer: DatasetDesigner, hub: DatasetHub) -> HubRepository:
+def prepare_dataset(
+    recipe_path: Path, dataset: HubDataset, settings: Settings, designer: DatasetDesigner, hub: DatasetHub
+) -> tuple[PortableRecipe, HubRepository]:
+    recipe = load_recipe(recipe_path)
     designer.validate(recipe)
+    plan = plan_seed_upload(recipe, f"{dataset.namespace}/{settings.seed_bucket_name}")
     repository = hub.read(dataset)
     match repository:
         case StoredDataset(recipe_source=source):
             with reading_yaml_file(f"{dataset.repo_id}/recipe.yaml", "recipe"):
-                stored = parse_recipe(source)
-            if not recipe.generates_rows_like(stored):
+                stored = parse_portable_recipe(source)
+            if not plan.recipe.generates_rows_like(stored):
                 raise CommandError(
                     f"The recipe differs from the recipe of the dataset {dataset.repo_id}. "
                     "Rows of one dataset come from one recipe."
@@ -55,7 +60,9 @@ def check_dataset(recipe: Recipe, dataset: HubDataset, designer: DatasetDesigner
             pass
         case _:
             assert_never(repository)
-    return repository
+    if plan.upload is not None:
+        hub.upload_seeds(plan.upload)
+    return plan.recipe, repository
 
 
 @app.command("submit", help="Start a Vast.ai job that creates the dataset of a recipe.")
@@ -70,8 +77,7 @@ def submit_dataset(
 ) -> None:
     if settings.datasets_image is None:
         raise CommandError("The datasets image is not set. Set the environment variable LLM_LAB_DATASETS_IMAGE.")
-    recipe = load_recipe(recipe_path)
-    check_dataset(recipe, dataset, designer, hub)
+    recipe, _ = prepare_dataset(recipe_path, dataset, settings, designer, hub)
     report(orchestrator.submit(build_dataset_job(recipe, dataset, rows, settings.datasets_image)))
 
 
@@ -80,14 +86,14 @@ def create_dataset(
     recipe_path: RecipeArgument,
     dataset: DatasetOption,
     rows: RowsOption,
+    settings: SettingsDep,
     server: ModelServerDep,
     designer: DatasetDesignerDep,
     hub: DatasetHubDep,
 ) -> None:
-    recipe = load_recipe(recipe_path)
-    repository = check_dataset(recipe, dataset, designer, hub)
-    with server.serve(recipe):
-        directory = designer.create(recipe, dataset.name, rows)
+    recipe, repository = prepare_dataset(recipe_path, dataset, settings, designer, hub)
+    with server.serve(recipe.recipe):
+        directory = designer.create(recipe.recipe, dataset.name, rows)
     typer.echo(hub.publish(dataset, repository, directory, recipe))
 
 

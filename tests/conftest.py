@@ -7,7 +7,8 @@ import yaml
 from typer.testing import CliRunner
 
 from llm_lab.datasets.hub import HubDataset, HubRepository
-from llm_lab.datasets.recipe import Recipe, parse_recipe
+from llm_lab.datasets.recipe import PortableRecipe, Recipe, parse_portable_recipe, parse_recipe
+from llm_lab.datasets.seeds import SeedUpload
 
 
 def build_model_config(alias: str, model: str = "Qwen/Qwen3-8B", provider: str = "vllm") -> dict[str, str]:
@@ -15,7 +16,11 @@ def build_model_config(alias: str, model: str = "Qwen/Qwen3-8B", provider: str =
 
 
 def build_recipe_source(
-    model_configs: list[dict[str, str]], *, prompt: str = "Write one sentence about {{ topic }}.", **sections: object
+    model_configs: list[dict[str, str]],
+    *,
+    prompt: str = "Write one sentence about {{ topic }}.",
+    seed_source: dict[str, str] | None = None,
+    **sections: object,
 ) -> str:
     return yaml.safe_dump(
         {
@@ -41,6 +46,7 @@ def build_recipe_source(
                     },
                     {"name": "sentence", "column_type": "llm-text", "model_alias": "writer", "prompt": prompt},
                 ],
+                **({} if seed_source is None else {"seed_config": {"source": seed_source}}),
             },
             **sections,
         }
@@ -76,15 +82,20 @@ class FakeHub:
     journal: Journal
     repositories: dict[str, HubRepository] = field(default_factory=dict[str, HubRepository])
     published: list[HubRepository] = field(default_factory=list[HubRepository])
+    uploads: list[SeedUpload] = field(default_factory=list[SeedUpload])
 
     def read(self, dataset: HubDataset) -> HubRepository:
         self.journal.events.append(f"read {dataset.repo_id}")
         return self.repositories.get(dataset.repo_id)
 
-    def publish(self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: Recipe) -> str:
+    def publish(self, dataset: HubDataset, repository: HubRepository, directory: Path, recipe: PortableRecipe) -> str:
         self.journal.events.append(f"publish {dataset.repo_id} {directory.name}")
         self.published.append(repository)
         return f"https://huggingface.co/datasets/{dataset.repo_id}"
+
+    def upload_seeds(self, upload: SeedUpload) -> None:
+        self.journal.events.append(f"upload seeds to {upload.bucket_id}")
+        self.uploads.append(upload)
 
 
 def run_cli(app: typer.Typer, arguments: list[str]) -> str:
@@ -116,6 +127,11 @@ def recipe_source() -> str:
 @pytest.fixture
 def recipe(recipe_source: str) -> Recipe:
     return parse_recipe(recipe_source)
+
+
+@pytest.fixture
+def portable_recipe(recipe_source: str) -> PortableRecipe:
+    return parse_portable_recipe(recipe_source)
 
 
 @pytest.fixture

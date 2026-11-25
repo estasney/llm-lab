@@ -1,7 +1,10 @@
+from pathlib import Path
+
+import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from llm_lab.datasets.recipe import Recipe, RecipeJob, parse_recipe
+from llm_lab.datasets.recipe import PortableRecipe, RecipeJob, parse_portable_recipe, parse_recipe
 from llm_lab.errors import CommandError
 from llm_lab.jobs.protocol import PlacementKind, ResourceRequest
 from tests.conftest import build_model_config, build_recipe_source
@@ -66,6 +69,33 @@ def test_recipe_with_an_invalid_section_is_rejected(source: str) -> None:
     ],
     ids=["other-job", "other-column", "other-vllm-args"],
 )
-def test_recipes_generate_like_rows_when_only_the_job_differs(recipe: Recipe, other: str, *, expected: bool) -> None:
-    actual = recipe.generates_rows_like(parse_recipe(other))
+def test_recipes_generate_like_rows_when_only_the_job_differs(
+    portable_recipe: PortableRecipe, other: str, *, expected: bool
+) -> None:
+    actual = portable_recipe.generates_rows_like(parse_portable_recipe(other))
     assert actual == expected, f"Expected {expected} for {other!r}, got {actual}."
+
+
+@pytest.mark.parametrize(
+    "seed_source",
+    [
+        {"seed_type": "hf", "path": "buckets/lab/llm-lab-seeds/seeds/0f/*.parquet"},
+        {"seed_type": "hf", "path": "datasets/lab/questions/data/*.parquet"},
+    ],
+    ids=["bucket", "dataset"],
+)
+def test_recipe_with_hub_seeds_runs_on_another_machine(seed_source: dict[str, str]) -> None:
+    source = build_recipe_source([build_model_config("writer")], seed_source=seed_source)
+
+    portable = parse_portable_recipe(source)
+
+    assert portable.recipe.source == source, "Expected the portable recipe to keep the recipe file unchanged."
+
+
+def test_recipe_with_local_seeds_does_not_run_on_another_machine(tmp_path: Path) -> None:
+    seeds = tmp_path / "questions.parquet"
+    pd.DataFrame({"question": ["Why is the sky blue?"]}).to_parquet(seeds)
+    source = build_recipe_source([build_model_config("writer")], seed_source={"seed_type": "local", "path": str(seeds)})
+
+    with pytest.raises(CommandError, match="only from an hf seed source"):
+        parse_portable_recipe(source)
