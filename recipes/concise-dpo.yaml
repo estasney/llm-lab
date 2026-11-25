@@ -22,6 +22,15 @@ data_designer:
       inference_parameters:
         max_parallel_requests: 32
         max_tokens: 8192
+    - alias: writer_no_thinking
+      model: Qwen/Qwen3-8B
+      provider: vllm
+      inference_parameters:
+        max_parallel_requests: 32
+        max_tokens: 2048
+        extra_body:
+          chat_template_kwargs:
+            enable_thinking: false
 
   columns:
     - name: prompt_type
@@ -66,7 +75,7 @@ data_designer:
 
     - name: prompt
       column_type: llm-text
-      model_alias: writer
+      model_alias: writer_no_thinking
       prompt: |
         Write one message that a user sends to an AI assistant.
         The message is a {{ prompt_type }} about {{ domain }}.
@@ -94,7 +103,7 @@ data_designer:
 
     - name: completeness
       column_type: llm-judge
-      model_alias: writer
+      model_alias: writer_no_thinking
       prompt: |
         A user sent this message:
         <message>
