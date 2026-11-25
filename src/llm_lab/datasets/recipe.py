@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Self
 
 import yaml
 from data_designer.config.data_designer_config import DataDesignerConfig
@@ -33,6 +33,9 @@ class Recipe:
     data_designer: DataDesignerConfig
     served_model: str
     provider_name: str
+
+    def generates_rows_like(self, other: Self) -> bool:
+        return (self.data_designer, self.vllm_args) == (other.data_designer, other.vllm_args)
 
 
 def parse_recipe(source: str) -> Recipe:

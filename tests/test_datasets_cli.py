@@ -12,9 +12,10 @@ from llm_lab.cli import app
 from llm_lab.cli.datasets.deps import get_dataset_designer, get_dataset_hub, get_model_server
 from llm_lab.cli.dependent_typer import DependentTyper
 from llm_lab.cli.jobs.deps import get_job_orchestrator
-from llm_lab.datasets.hub import HubDataset
+from llm_lab.datasets.hub import HubDataset, StoredDataset
 from llm_lab.datasets.job import build_dataset_job
 from llm_lab.datasets.recipe import Recipe
+from llm_lab.datasets.repository import RepositoryFilePaths, RepositoryMetadata
 from llm_lab.jobs.protocol import JobRecord, JobSpec, Running
 from llm_lab.keyring_settings import SecretName
 from llm_lab.settings import Settings, get_settings
@@ -62,7 +63,7 @@ def test_create_generates_while_the_model_is_served_and_publishes_after(journal:
 
     expected = [
         "validate Qwen/Qwen3-8B",
-        "exists lab/sentences",
+        "read lab/sentences",
         "start Qwen/Qwen3-8B",
         "create sentences 4",
         "stop",
@@ -72,17 +73,63 @@ def test_create_generates_while_the_model_is_served_and_publishes_after(journal:
     assert output == "https://huggingface.co/datasets/lab/sentences\n", f"Expected the dataset URL, got {output!r}."
 
 
+def build_stored_dataset(recipe_source: str) -> StoredDataset:
+    return StoredDataset(
+        revision="abc123",
+        recipe_source=recipe_source,
+        metadata=RepositoryMetadata(
+            actual_num_records=4,
+            target_num_records=4,
+            file_paths=RepositoryFilePaths(data=("data/batch_00000.parquet",)),
+        ),
+    )
+
+
+def test_create_adds_rows_to_a_dataset_of_a_recipe_with_other_job_settings(journal: Journal, recipe_path: Path) -> None:
+    stored = build_stored_dataset(build_recipe_source([build_model_config("writer")]).replace("600", "900"))
+    hub = FakeHub(journal, repositories={"lab/sentences": stored})
+    cli = build_app(journal, hub, FakeOrchestrator(), None)
+
+    actual = invoke_cli(cli, ["datasets", "create", str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"])
+
+    expected = (0, "https://huggingface.co/datasets/lab/sentences\n")
+    assert actual == expected, f"Expected {expected}, got {actual}."
+    assert hub.published == [stored], f"Expected the rows to go onto the stored dataset, got {hub.published}."
+
+
 @pytest.mark.parametrize("command", ["create", "submit"])
-def test_command_starts_nothing_when_the_dataset_exists(journal: Journal, recipe_path: Path, command: str) -> None:
+def test_command_starts_nothing_when_the_dataset_has_another_recipe(
+    journal: Journal, recipe_path: Path, command: str
+) -> None:
     orchestrator = FakeOrchestrator()
-    cli = build_app(journal, FakeHub(journal, existing={"lab/sentences"}), orchestrator, "ghcr.io/lab/datasets:1")
+    stored = build_stored_dataset(build_recipe_source([build_model_config("writer")], prompt="Name a {{ topic }}."))
+    hub = FakeHub(journal, repositories={"lab/sentences": stored})
+    cli = build_app(journal, hub, orchestrator, "ghcr.io/lab/datasets:1")
 
     actual = invoke_cli(cli, ["datasets", command, str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"])
 
-    expected = (1, "Error: The dataset lab/sentences already exists on the Hub.\n")
+    expected = (
+        1,
+        "Error: The recipe differs from the recipe of the dataset lab/sentences. "
+        "Rows of one dataset come from one recipe.\n",
+    )
     assert actual == expected, f"Expected {expected}, got {actual}."
-    assert journal.events == ["validate Qwen/Qwen3-8B", "exists lab/sentences"], f"Got {journal.events}."
+    assert journal.events == ["validate Qwen/Qwen3-8B", "read lab/sentences"], f"Got {journal.events}."
     assert orchestrator.submitted == [], f"Expected no job, got {orchestrator.submitted}."
+
+
+def test_command_reports_a_stored_recipe_that_is_not_valid(journal: Journal, recipe_path: Path) -> None:
+    hub = FakeHub(journal, repositories={"lab/sentences": build_stored_dataset("job: {}\n")})
+    cli = build_app(journal, hub, FakeOrchestrator(), None)
+
+    exit_code, output = invoke_cli(
+        cli, ["datasets", "create", str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"]
+    )
+
+    assert (exit_code, output.splitlines()[0]) == (1, "Error: lab/sentences/recipe.yaml is not a valid recipe:"), (
+        f"Got {output!r}."
+    )
+    assert hub.published == [], f"Expected no upload, got {hub.published}."
 
 
 @pytest.mark.parametrize("dataset", ["sentences", "lab/Sentences", "lab/sentences/extra"])
@@ -121,7 +168,7 @@ def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
     expected = [build_dataset_job(recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")]
     assert orchestrator.submitted == expected, f"Expected {expected}, got {orchestrator.submitted}."
     assert (exit_code, JobRecord.model_validate_json(output).status.condition) == (0, "running"), f"Got {output!r}."
-    assert journal.events == ["validate Qwen/Qwen3-8B", "exists lab/sentences"], f"Got {journal.events}."
+    assert journal.events == ["validate Qwen/Qwen3-8B", "read lab/sentences"], f"Got {journal.events}."
 
 
 def test_submit_requires_the_datasets_image(journal: Journal, recipe_path: Path) -> None:

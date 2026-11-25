@@ -4,8 +4,8 @@ llm-lab generates synthetic datasets with [NeMo Data Designer](https://github.co
 
 ## Flow
 
-1. `llm-lab datasets submit` runs on your machine. It reads the recipe, validates it with Data Designer, and makes sure that the dataset repository does not exist on the Hugging Face Hub. Then it submits a job through `llm-lab jobs`.
-2. The job runs the datasets image. The image runs `llm-lab datasets create`, which serves the model of the recipe with vLLM, generates the rows with Data Designer, and uploads the dataset to a private Hub repository.
+1. `llm-lab datasets submit` runs on your machine. It reads the recipe, validates it with Data Designer, and makes sure that an existing dataset repository on the Hugging Face Hub stores a recipe that generates the same rows. Then it submits a job through `llm-lab jobs`.
+2. The job runs the datasets image. The image runs `llm-lab datasets create`, which serves the model of the recipe with vLLM, generates the rows with Data Designer, and uploads them to a private Hub repository in one commit.
 3. The job writes its exit code to the instance log. Run `llm-lab jobs status <dataset name>` to record the result and destroy the instance. If you do not, the instance destroys itself after `ttl_seconds_after_finished`.
 
 ## Stopping a job and SSH access
@@ -58,3 +58,9 @@ llm-lab datasets create recipes/<recipe>.yaml --dataset <namespace>/<name> --row
 ```
 
 `datasets create` is the command that the job runs. You can also run it on a machine that has vLLM and a GPU.
+
+## Adding rows to a dataset
+
+When the dataset repository exists, `datasets submit` and `datasets create` add the new rows to it. The commands stop when the `data_designer` or `vllm_args` section of the recipe differs from the `recipe.yaml` of the repository. The `job` section can differ.
+
+Each run uploads its parquet files with a run id in their names, for example `data/<run id>-batch_00000.parquet`, so the files of earlier runs stay. The run rewrites `README.md` and `metadata.json` to describe all rows of the repository. A run uploads all of its files in one commit, so a failed run leaves the repository unchanged. The commit fails when another commit reached the repository after the check.

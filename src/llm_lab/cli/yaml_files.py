@@ -9,7 +9,7 @@ from llm_lab.errors import CommandError
 
 
 @contextmanager
-def reading_yaml_file(path: Path, kind: str) -> Generator[None]:
+def reading_yaml_file(path: Path | str, kind: str) -> Generator[None]:
     try:
         yield
     except yaml.YAMLError as error:
