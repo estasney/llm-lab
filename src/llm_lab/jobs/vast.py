@@ -88,15 +88,17 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
 def build_instance_request(
     spec: JobSpec, secrets: Mapping[SecretName, SecretStr], access: InstanceAccess, api_url: str, ssh_port: int
 ) -> dict[str, object]:
+    # Vast.ai overwrites /root/.ssh/authorized_keys after the container starts.
     script = "\n".join(
         [
             "if command -v sshd >/dev/null 2>&1; then",
             "mkdir -p -m 700 /run/sshd /root/.ssh",
             "mkdir -p /etc/profile.d",
-            "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /root/.ssh/authorized_keys",
+            "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /run/sshd/llm-lab-authorized-keys",
             "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)",
             'printf \'export PATH="%s"\\n\' "$PATH" > /etc/profile.d/llm-lab-path.sh',
             f'"$(command -v sshd)" -p {ssh_port} -h /run/sshd/llm-lab-host-key '
+            "-o 'AuthorizedKeysFile=/run/sshd/llm-lab-authorized-keys .ssh/authorized_keys' "
             "-o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password",
             "fi",
             "if [ ! -e /llm-lab-job-done ]; then",
