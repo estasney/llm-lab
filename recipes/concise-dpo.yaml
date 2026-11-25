@@ -53,19 +53,27 @@ data_designer:
 
     - name: domain
       column_type: sampler
-      sampler_type: category
+      sampler_type: subcategory
       params:
+        category: prompt_type
         values:
-          - software engineering
-          - data science
-          - cooking
-          - personal finance
-          - health and fitness
-          - travel
-          - home repair
-          - science
-          - history
-          - writing and grammar
+          factual question: &all_domains
+            - software engineering
+            - data science
+            - science
+            - history
+          how-to question:
+            - software engineering
+            - data science
+            - science
+          code question: &technical_domains
+            - software engineering
+            - data science
+          debugging request: *technical_domains
+          comparison between two options: *all_domains
+          request for advice: *technical_domains
+          request for an explanation of a concept: *all_domains
+          casual conversation: *all_domains
 
     - name: user_style
       column_type: sampler
@@ -73,9 +81,26 @@ data_designer:
       params:
         values:
           - one short line with no punctuation
-          - two or three full sentences with some context
-          - a long message with background details
-          - a message that includes a code snippet or error text
+          - two or three short lines
+        weights: [0.7, 0.3]
+
+    - name: code_attachment
+      column_type: sampler
+      sampler_type: subcategory
+      params:
+        category: prompt_type
+        values:
+          factual question: &no_code
+            - The message contains no code.
+          how-to question: *no_code
+          code question: &maybe_code
+            - The message contains no code.
+            - The message also contains a code snippet or error text.
+          debugging request: *maybe_code
+          comparison between two options: *no_code
+          request for advice: *no_code
+          request for an explanation of a concept: *no_code
+          casual conversation: *no_code
 
     - name: prompt
       column_type: llm-text
@@ -84,6 +109,7 @@ data_designer:
         Write one message that a user sends to an AI assistant.
         The message is a {{ prompt_type }} about {{ domain }}.
         Write it as {{ user_style }}.
+        {{ code_attachment }}
         Write only the message, with no quotes and no label.
 
     - name: baseline_answer
@@ -99,10 +125,10 @@ data_designer:
       extract_reasoning_content: true
       drop: true
       system_prompt: |
-        You give the answer in the first sentence and stop when the point is made.
-        You do not write preambles, restate the question, add summaries or offer more help.
-        You keep every fact, step and caveat that the question needs.
-        You use lists and code blocks only when the content is a list or code.
+        Answer the question directly, then stop.
+        Keep: the answer, each step or value the user needs, code that the question asks for or that fixes the user's code, and caveats that change what the user should do.
+        Cut: greetings, restating the question, background the user did not ask for, more than one example, closing summaries, offers of more help, headings and emoji.
+        Put all code in fenced code blocks with a language tag.
       prompt: "{{ prompt }}"
 
     - name: completeness
@@ -125,7 +151,8 @@ data_designer:
         </long_answer>
 
         Decide if the short answer leaves out information that the user needs.
-        Content of the long answer that the user does not need is not missing information.
+        The user needs only these: the answer, each step or value the user needs, code that the message asks for or that fixes the user's code, and caveats that change what the user should do.
+        Content of the long answer that the user does not need is not missing information. Extra examples, background and depth are not missing information.
         Do not count preambles, restatements, summaries or offers of more help as missing.
       scores:
         - name: completeness
