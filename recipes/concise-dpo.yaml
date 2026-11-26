@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=recipe.schema.json
 job:
-  disk_gb: 80
+  disk_gb: 50
   ttl_seconds_after_finished: 600
   placement:
     kind: resources
     gpu_name: L40
     gpu_count: 1
-    max_dollars_per_hour: 1.5
+    max_dollars_per_hour: 0.9
     max_download_dollars_per_gb: 0.01
     countries:
       exclude: [CN]
@@ -20,18 +20,20 @@ vllm_args:
   - --kv-cache-dtype
   - fp8
   - --language-model-only
+  - --max-num-seqs
+  - &concurrency "40"
 
 rows_per_batch: 100
 
 data_designer:
   model_configs:
     - alias: writer
-      model: Qwen/Qwen3.8-27B-FP8
+      model: &model Qwen/Qwen3.8-27B-FP8
       provider: vllm
       inference_parameters:
-        max_parallel_requests: 24
+        max_parallel_requests: *concurrency
         max_tokens: 8192
-        timeout: 600
+        timeout: &timeout 600
         temperature: 1.0
         top_p: 0.95
         extra_body:
@@ -40,12 +42,12 @@ data_designer:
             enable_thinking: true
             reasoning_effort: medium
     - alias: writer_no_thinking
-      model: Qwen/Qwen3.8-27B-FP8
+      model: *model
       provider: vllm
       inference_parameters:
-        max_parallel_requests: 24
+        max_parallel_requests: *concurrency
         max_tokens: 2048
-        timeout: 600
+        timeout: *timeout
         temperature: 0.7
         top_p: 0.8
         extra_body:
