@@ -8,7 +8,7 @@ from llm_lab.datasets.graphs.nodes.models.chat import ChatModel, ChatModelFactor
 from llm_lab.settings import Settings, get_settings
 
 
-async def open_chat_model_factory(
+async def get_oai_model_factory(
     settings: Annotated[Settings, Depends(get_settings, scope=Scope.run)],
 ) -> AsyncIterator[ChatModelFactory]:
     async with AsyncOpenAI(
@@ -21,4 +21,4 @@ async def open_chat_model_factory(
         yield create_chat_model
 
 
-type ChatModelFactoryDep = Annotated[ChatModelFactory, Depends(open_chat_model_factory, scope=Scope.run)]
+type ChatModelFactoryDep = Annotated[ChatModelFactory, Depends(get_oai_model_factory, scope=Scope.run)]
