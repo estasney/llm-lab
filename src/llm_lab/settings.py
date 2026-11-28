@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     vllm_poll_seconds: PositiveFloat = Field(
         default=5, description="Delay in seconds between two health checks of vLLM.", examples=[5, 0.5]
     )
+    vllm_request_timeout_seconds: PositiveFloat = Field(
+        default=600,
+        description="Time limit in seconds for one chat completion request to vLLM.",
+        examples=[600],
+    )
     vllm_stop_timeout_seconds: PositiveFloat = Field(
         default=60,
         description="Time in seconds that vLLM gets to stop before it is killed.",
