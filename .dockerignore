@@ -1,8 +1,2 @@
 *
-!pyproject.toml
-!uv.lock
-!README.md
-!src
-!docker/datasets/dataset-job.sh
-!docker/datasets/entrypoint.sh
-**/__pycache__
+!docker/base/entrypoint.sh

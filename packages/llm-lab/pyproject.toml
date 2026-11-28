@@ -1,0 +1,26 @@
+[project]
+name = "llm-lab"
+version = "0.1.19"
+description = "Run jobs on rented Vast.ai instances and manage their lifecycle."
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.1",
+    "cryptography>=50.0.2",
+    "httpx>=0.28.1",
+    "keyring>=25.7.0",
+    "pycountry>=26.2.16",
+    "pydantic>=2.14.4",
+    "pydantic-extra-types>=2.11.1",
+    "pydantic-settings>=2.16.3",
+    "pyyaml>=6.0.4",
+    "questionary>=2.1.1",
+    "sqlalchemy>=2.1.9",
+    "typer>=0.29.2",
+]
+
+[project.scripts]
+llm-lab = "llm_lab.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"

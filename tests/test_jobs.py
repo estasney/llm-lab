@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import shlex
+import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -25,12 +26,14 @@ from llm_lab.cli import app
 from llm_lab.cli.jobs.deps import get_artifact_downloader, get_http_client
 from llm_lab.database import build_migration_config
 from llm_lab.errors import CommandError
-from llm_lab.jobs.access import JobAccessStore, RsyncDownloader, SshEndpoint
+from llm_lab.jobs.access import CodeDelivery, JobAccessStore, RsyncDownloader, RsyncUploader, SshEndpoint
+from llm_lab.jobs.code import WorkspaceCodeSource
 from llm_lab.jobs.orchestrator import JobOrchestrator
 from llm_lab.jobs.protocol import (
     Aborted,
     ExplicitOffer,
     Failed,
+    JobCode,
     JobSpec,
     PlacementKind,
     ResourceRequest,
@@ -155,6 +158,29 @@ class FakeDownloader:
 
 
 @dataclass
+class FakeCodeSource:
+    code: JobCode = field(
+        default_factory=lambda: JobCode(root=Path("/work"), files=("jobs/train/train.py", "uv.lock"), digest="0a1b")
+    )
+
+    def read(self, package: str) -> JobCode:
+        return self.code
+
+
+@dataclass
+class FakeUploader:
+    deliveries: Iterator[CodeDelivery] = field(default_factory=lambda: iter([CodeDelivery.delivered]))
+    uploads: list[tuple[str, SshEndpoint, JobCode]] = field(default_factory=list)
+    failure: CommandError | None = None
+
+    def upload(self, job_name: str, endpoint: SshEndpoint, code: JobCode) -> CodeDelivery:
+        if self.failure is not None:
+            raise self.failure
+        self.uploads.append((job_name, endpoint, code))
+        return next(self.deliveries, CodeDelivery.unreachable)
+
+
+@dataclass
 class Workbench:
     vast: FakeVast
     engine: Engine
@@ -162,6 +188,7 @@ class Workbench:
     orchestrator: JobOrchestrator
     sleeps: list[float]
     access: JobAccessStore
+    uploader: FakeUploader
     downloader: FakeDownloader
 
 
@@ -178,6 +205,7 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
     monkeypatch.setenv("LLM_LAB_JOB_DOWNLOADS_DIR", str(tmp_path / "downloads"))
     settings = Settings()
     access = JobAccessStore(settings)
+    uploader = FakeUploader()
     downloader = FakeDownloader(settings.job_downloads_dir)
     engine = settings.database_engine
     command.upgrade(build_migration_config(engine), "head")
@@ -191,9 +219,21 @@ def workbench(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Workb
         vast,
         engine,
         provider,
-        JobOrchestrator(provider, session, SettingsSecretSource(settings), access, downloader, SteppingClock().read),
+        JobOrchestrator(
+            settings,
+            provider,
+            session,
+            SettingsSecretSource(settings),
+            access,
+            FakeCodeSource(),
+            uploader,
+            downloader,
+            SteppingClock().read,
+            sleeps.append,
+        ),
         sleeps,
         access,
+        uploader,
         downloader,
     )
     session.close()
@@ -1074,3 +1114,239 @@ def test_rsync_downloader_copies_the_remote_directory_through_the_job_ssh_comman
         f"{tmp_path / 'downloads' / 'train'}/",
     ]
     assert recorded.read_text().splitlines() == expected
+
+
+def build_spec_with_package() -> JobSpec:
+    return build_spec().model_copy(update={"package": "train-job"})
+
+
+def test_submit_uploads_the_code_of_the_package_and_the_instance_runs_the_command_after_the_code_arrives(
+    workbench: Workbench,
+) -> None:
+    """
+    Arrange: a job spec that names a workspace package, and an uploader that reports the instance as not reachable
+        one time and then delivers the code.
+    Act: submit the job.
+    Assert: the job is running, the record and each stored transition have the digest of the code, the uploader
+        received the code two times at the public SSH endpoint of the instance with one delay between the attempts,
+        and the script of the instance waits for the marker file of the code with a time limit, changes to the code
+        directory and runs the command with uv for the package.
+    """
+    workbench.uploader.deliveries = iter([CodeDelivery.unreachable, CodeDelivery.delivered])
+
+    record = workbench.orchestrator.submit(build_spec_with_package())
+
+    code = FakeCodeSource().code
+    endpoint = SshEndpoint("203.0.113.5", 41022)
+    assert isinstance(record.status, Running)
+    assert record.code_digest == "0a1b"
+    assert workbench.orchestrator.read("train") == record
+    assert workbench.uploader.uploads == [("train", endpoint, code), ("train", endpoint, code)]
+    assert workbench.sleeps == [10]
+    rent = next(request for request in workbench.vast.requests if request.url.path.startswith("/api/v0/asks/"))
+    script = json.loads(rent.content)["args"][2]
+    expected = (
+        "timeout 900 sh -c 'until [ -e /workspace/code/.llm-lab-code-complete ]; do sleep 1; done' "
+        "&& cd /workspace/code "
+        "&& uv run --locked --package train-job -- python train.py --note 'two words'\n"
+    )
+    assert expected in script, f"Expected the script to contain {expected!r}, got {script!r}."
+
+
+def test_submit_destroys_the_instance_and_records_the_job_as_aborted_when_the_code_does_not_arrive_in_time(
+    workbench: Workbench,
+) -> None:
+    """
+    Arrange: a job spec that names a workspace package, and an uploader that always reports the instance as not
+        reachable.
+    Act: submit the job.
+    Assert: the job is aborted with a reason that names the code, the stored record is the same, the instance is
+        destroyed, the SSH keys of the job are removed, and the database has the pending, the running and the
+        aborted transitions.
+    """
+    workbench.uploader.deliveries = iter([])
+
+    record = workbench.orchestrator.submit(build_spec_with_package())
+
+    assert isinstance(record.status, Aborted)
+    assert "code" in record.status.reason
+    assert workbench.orchestrator.read("train") == record
+    assert workbench.vast.live_instances == {}
+    assert not (workbench.access.directory / "train").exists(), "Expected the throwaway keys to be removed."
+    assert read_conditions(workbench.engine, "train") == ["pending", "running", "aborted"]
+
+
+def test_submit_destroys_the_instance_when_the_upload_of_the_code_raises_an_error(workbench: Workbench) -> None:
+    """
+    Arrange: a job spec that names a workspace package, and an uploader that raises an error.
+    Act: submit the job.
+    Assert: the submission raises the error of the uploader, the instance is destroyed, and the stored job is aborted.
+    """
+    workbench.uploader.failure = CommandError("rsync exited with status 23")
+
+    with pytest.raises(CommandError, match="status 23"):
+        workbench.orchestrator.submit(build_spec_with_package())
+
+    assert workbench.vast.live_instances == {}
+    assert isinstance(workbench.orchestrator.read("train").status, Aborted)
+
+
+def test_submit_waits_for_the_code_upload_while_the_instance_has_no_public_ssh_port(workbench: Workbench) -> None:
+    """
+    Arrange: a job spec that names a workspace package, and an instance that reports no ports.
+    Act: submit the job.
+    Assert: the uploader received no request, and the job is aborted after the time limit for the code.
+    """
+    workbench.vast.ports = {}
+
+    record = workbench.orchestrator.submit(build_spec_with_package())
+
+    assert workbench.uploader.uploads == []
+    assert isinstance(record.status, Aborted)
+
+
+def write_workspace(root: Path) -> None:
+    files = {
+        "pyproject.toml": '[tool.uv.workspace]\nmembers = ["packages/*", "jobs/*"]\n',
+        ".gitignore": "__pycache__/\n",
+        "uv.lock": (
+            'version = 1\n\n[manifest]\nmembers = ["cli", "shared", "train-job"]\n\n'
+            '[[package]]\nname = "cli"\nsource = { editable = "packages/cli" }\n\n'
+            '[[package]]\nname = "httpx"\nsource = { registry = "https://pypi.org/simple" }\n\n'
+            '[[package]]\nname = "shared"\nsource = { editable = "packages/shared" }\n'
+            'dependencies = [{ name = "httpx" }]\n\n'
+            '[[package]]\nname = "train-job"\nsource = { editable = "jobs/train" }\n'
+            'dependencies = [{ name = "shared" }]\n'
+        ),
+        "packages/cli/pyproject.toml": '[project]\nname = "cli"\n',
+        "packages/cli/src/cli/__init__.py": "",
+        "packages/shared/pyproject.toml": '[project]\nname = "shared"\n',
+        "packages/shared/src/shared/__init__.py": "",
+        "packages/shared/src/shared/__pycache__/cached.pyc": "",
+        "jobs/train/pyproject.toml": '[project]\nname = "train-job"\n',
+        "jobs/train/train.py": "print('train')\n",
+        "notes.txt": "",
+    }
+    for name, content in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text(content)
+    subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "pyproject.toml", "uv.lock", "packages"], check=True)
+
+
+def test_code_of_a_package_is_its_member_the_members_that_it_needs_and_the_project_files_of_the_workspace(
+    tmp_path: Path,
+) -> None:
+    """
+    Arrange: a git repository with a uv workspace of three members, where the job member depends on the shared member
+        and is not yet tracked by git, the shared member has a file that git ignores, and the root has a file that
+        is not part of a member.
+    Act: read the code of the job member two times, with a change to a file of the job member between the reads.
+    Assert: the code has the root project file, the lock file, the project file of each member and all other files of
+        the job member and the shared member, it does not have the ignored file, the root file or the source of
+        the member that the job does not need, and the digest is different after the change.
+    """
+    write_workspace(tmp_path)
+    source = WorkspaceCodeSource(Settings(workspace_dir=tmp_path))
+
+    code = source.read("train-job")
+    (tmp_path / "jobs/train/train.py").write_text("print('changed')\n")
+    changed = source.read("train-job")
+
+    expected = (
+        "jobs/train/pyproject.toml",
+        "jobs/train/train.py",
+        "packages/cli/pyproject.toml",
+        "packages/shared/pyproject.toml",
+        "packages/shared/src/shared/__init__.py",
+        "pyproject.toml",
+        "uv.lock",
+    )
+    assert (code.root, code.files) == (tmp_path, expected), f"Expected the files {expected}, got {code.files}."
+    assert changed.files == code.files
+    assert changed.digest != code.digest, "Expected the digest to follow the contents of the files."
+
+
+def test_code_of_a_package_that_is_not_a_workspace_member_is_rejected(tmp_path: Path) -> None:
+    """
+    Arrange: a git repository with a uv workspace, and a directory that has no lock file.
+    Act: read the code of a registry package of the lock file, then read the code of a member in the directory
+        without a lock file.
+    Assert: the first read raises an error that names the package and the members, and the second read raises an
+        error that names the missing lock file.
+    """
+    write_workspace(tmp_path / "workspace")
+
+    with pytest.raises(CommandError, match=r"no member with the name httpx.*'cli', 'shared', 'train-job'"):
+        WorkspaceCodeSource(Settings(workspace_dir=tmp_path / "workspace")).read("httpx")
+    with pytest.raises(CommandError, match=r"uv\.lock does not exist"):
+        WorkspaceCodeSource(Settings(workspace_dir=tmp_path / "empty")).read("train-job")
+
+
+@pytest.mark.parametrize(
+    ("rsync_status", "ssh_status", "expected"),
+    [
+        (0, 0, CodeDelivery.delivered),
+        (255, 0, CodeDelivery.unreachable),
+        (0, 255, CodeDelivery.unreachable),
+        (23, 0, "rsync exited with status 23"),
+    ],
+)
+def test_rsync_uploader_copies_the_listed_files_and_then_creates_the_marker_file(
+    tmp_path: Path,
+    workbench: Workbench,
+    monkeypatch: pytest.MonkeyPatch,
+    rsync_status: int,
+    ssh_status: int,
+    expected: CodeDelivery | str,
+) -> None:
+    """
+    Arrange: fake rsync and ssh programs on the PATH that record their arguments and their input and exit with the
+        given statuses, and the SSH keys of a job.
+    Act: upload the code of the job with the rsync uploader.
+    Assert: the upload reports delivered when both programs exit with status 0, reports unreachable when one of them
+        exits with status 255, and raises an error that names any other status. rsync received the names of the
+        code files on its input and the SSH command of the job with batch mode and a connection time limit, and
+        ssh ran only after a successful copy and created the marker file in the code directory.
+    """
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for program, status in (("rsync", rsync_status), ("ssh", ssh_status)):
+        (tools / program).write_text(
+            f'#!/bin/sh\nprintf "%s\\n" "$@" > {tmp_path}/{program}-arguments\n'
+            f"/bin/cat > {tmp_path}/{program}-input\nexit {status}\n"
+        )
+        (tools / program).chmod(0o755)
+    monkeypatch.setenv("PATH", str(tools))
+    workbench.access.create("train")
+    uploader = RsyncUploader(Settings(), workbench.access)
+    endpoint = SshEndpoint("203.0.113.5", 41022)
+    code = JobCode(root=tmp_path / "workspace", files=("jobs/train/train.py", "uv.lock"), digest="0a1b")
+
+    match expected:
+        case CodeDelivery():
+            assert uploader.upload("train", endpoint, code) == expected
+        case str():
+            with pytest.raises(CommandError, match=expected):
+                uploader.upload("train", endpoint, code)
+        case _:
+            assert_never(expected)
+
+    *ssh, host = workbench.access.build_ssh_command("train", endpoint)
+    ssh += ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+    assert (tmp_path / "rsync-arguments").read_text().splitlines() == [
+        "--archive",
+        "--compress",
+        "--from0",
+        "--files-from=-",
+        "--rsh",
+        shlex.join(ssh),
+        f"{tmp_path / 'workspace'}/",
+        f"{host}:/workspace/code/",
+    ]
+    assert (tmp_path / "rsync-input").read_text() == "jobs/train/train.py\0uv.lock"
+    marker_commands = (
+        [(tmp_path / "ssh-arguments").read_text().splitlines()[-1]] if (tmp_path / "ssh-arguments").exists() else []
+    )
+    expected_commands = ["touch /workspace/code/.llm-lab-code-complete"] if rsync_status == 0 else []
+    assert marker_commands == expected_commands

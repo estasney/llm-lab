@@ -1,44 +1,20 @@
-[project]
-name = "llm-lab"
-version = "0.1.19"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "alembic>=1.20.1",
-    "cryptography>=50.0.2",
-    "data-designer>=1.0.1",
-    "datasets>=5.2.0",
-    "httpx>=0.28.1",
-    "keyring>=25.7.0",
-    "openai>=3.60.0",
-    "pregel-redux>=0.6.0",
-    "pycountry>=26.2.16",
-    "pydantic>=2.14.4",
-    "pydantic-extra-types>=2.11.1",
-    "pydantic-settings>=2.16.3",
-    "pyyaml>=6.0.4",
-    "questionary>=2.1.1",
-    "sqlalchemy>=2.1.9",
-    "typer>=0.29.2",
-]
+[tool.uv.workspace]
+members = ["packages/*", "jobs/*"]
 
-[project.scripts]
-llm-lab = "llm_lab.cli:app"
+[tool.uv.sources]
+llm-lab = { workspace = true }
+llm-lab-runtime = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "llm-lab",
+    "llm-lab-runtime",
     "ast-grep-cli>=0.51.2",
     "basedpyright>=1.40.2",
-    "pandas-stubs>=3.1.0.261029",
     "pytest>=9.1.1,<9.2",
     "ruff>=0.17.6",
     "types-pyyaml>=6.0.12.20261122",
 ]
-
-[build-system]
-requires = ["uv_build>=0.13.9,<0.14.0"]
-build-backend = "uv_build"
 
 [tool.pytest]
 minversion = "9.1"
@@ -49,7 +25,6 @@ filterwarnings = ["error"]
 
 [tool.basedpyright]
 pythonVersion = "3.12"
-include = ["src", "tests"]
 typeCheckingMode = "recommended"
 enableTypeIgnoreComments = false
 reportAny = "hint"
@@ -71,6 +46,7 @@ reportUnusedParameter = "none"
 
 [tool.ruff]
 line-length = 120
+src = ["packages/*/src", "jobs/*/src"]
 target-version = "py312"
 
 [tool.ruff.lint]

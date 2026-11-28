@@ -1,0 +1,16 @@
+[project]
+name = "llm-lab-runtime"
+version = "0.1.0"
+description = "Code that jobs share on the instance: vLLM serving and chat models for graph nodes."
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "openai>=3.60.0",
+    "pregel-redux>=0.6.0",
+    "pydantic>=2.14.4",
+    "pydantic-settings>=2.16.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"

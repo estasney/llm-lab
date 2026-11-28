@@ -1,6 +1,6 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol, assert_never
 
@@ -9,13 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from llm_lab.errors import CommandError
-from llm_lab.jobs.access import InstanceAccess, SshEndpoint
+from llm_lab.jobs.access import CodeDelivery, InstanceAccess, SshEndpoint
 from llm_lab.jobs.protocol import (
     Aborted,
     Active,
     Completed,
     Failed,
     Halted,
+    JobCode,
     JobRecord,
     JobSpec,
     Pending,
@@ -25,6 +26,7 @@ from llm_lab.jobs.protocol import (
 )
 from llm_lab.jobs.tables import JobTransitionRow, select_latest_transitions
 from llm_lab.keyring_settings import SecretName
+from llm_lab.settings import Settings
 
 
 class InstanceProvider(Protocol):
@@ -36,7 +38,7 @@ class InstanceProvider(Protocol):
 
     def observe(self, instance_id: int) -> Active | Completed | Halted: ...
 
-    def find_ssh_endpoint(self, instance_id: int) -> SshEndpoint: ...
+    def find_ssh_endpoint(self, instance_id: int) -> SshEndpoint | None: ...
 
     def find_instances(self, job_name: str) -> Sequence[int]: ...
 
@@ -57,6 +59,14 @@ class ArtifactDownloader(Protocol):
     def download(self, job_name: str, endpoint: SshEndpoint, remote_directory: str) -> Path: ...
 
 
+class JobCodeSource(Protocol):
+    def read(self, package: str) -> JobCode: ...
+
+
+class CodeUploader(Protocol):
+    def upload(self, job_name: str, endpoint: SshEndpoint, code: JobCode) -> CodeDelivery: ...
+
+
 @dataclass(frozen=True)
 class Abandonment:
     record: JobRecord
@@ -66,19 +76,27 @@ class Abandonment:
 class JobOrchestrator:
     def __init__(
         self,
+        settings: Settings,
         provider: InstanceProvider,
         session: Session,
         secret_source: SecretSource,
         access_keys: AccessKeyStore,
+        code_source: JobCodeSource,
+        uploader: CodeUploader,
         downloader: ArtifactDownloader,
         read_clock: Callable[[], datetime],
+        sleep: Callable[[float], None],
     ) -> None:
+        self.settings = settings
         self.provider = provider
         self.access_keys = access_keys
+        self.code_source = code_source
+        self.uploader = uploader
         self.downloader = downloader
         self.secret_source = secret_source
         self.session = session
         self.read_clock = read_clock
+        self.sleep = sleep
 
     def submit(self, spec: JobSpec) -> JobRecord:
         previous = self.read_latest(spec.name)
@@ -91,14 +109,22 @@ class JobOrchestrator:
                 case _:
                     assert_never(previous.status)
         secrets = {name: self.secret_source.read(name) for name in spec.secret_environment}
+        match spec.package:
+            case None:
+                code = None
+            case str() as package:
+                code = self.code_source.read(package)
+            case _:
+                assert_never(spec.package)
         pending = Pending(submitted_at=self.read_clock())
-        self.record_transition(JobRecord(spec=spec, status=pending))
+        submitted = JobRecord(spec=spec, status=pending, code_digest=None if code is None else code.digest)
+        self.record_transition(submitted)
         access = self.access_keys.create(spec.name)
         rented: list[int] = []
         recorded = False
         try:
             status = self.rent_instance(spec, secrets, access, pending, rented)
-            record = JobRecord(spec=spec, status=status)
+            record = submitted.model_copy(update={"status": status})
             self.record_transition(record)
             recorded = True
         finally:
@@ -106,20 +132,63 @@ class JobOrchestrator:
                 self.destroy_instances(spec.name, rented)
                 self.access_keys.remove(spec.name)
         match status:
-            case Running():
-                pass
+            case Running() as running:
+                match code:
+                    case None:
+                        return record
+                    case JobCode():
+                        return self.deliver_code(record, running, code)
+                    case _:
+                        assert_never(code)
             case Aborted():
                 self.access_keys.remove(spec.name)
+                return record
             case _:
                 assert_never(status)
+
+    def deliver_code(self, record: JobRecord, running: Running, code: JobCode) -> JobRecord:
+        delivered = False
+        try:
+            delivered = self.upload_code(record.spec.name, running.instance_id, code)
+        finally:
+            if not delivered:
+                record = self.finish(
+                    record,
+                    [running.instance_id],
+                    Aborted(
+                        submitted_at=running.submitted_at,
+                        finished_at=self.read_clock(),
+                        reason=f"the code did not reach instance {running.instance_id}",
+                    ),
+                )
         return record
+
+    def upload_code(self, job_name: str, instance_id: int, code: JobCode) -> bool:
+        deadline = self.read_clock() + timedelta(seconds=self.settings.job_code_timeout_seconds)
+        while True:
+            match self.provider.find_ssh_endpoint(instance_id):
+                case SshEndpoint() as endpoint:
+                    delivery = self.uploader.upload(job_name, endpoint, code)
+                case None:
+                    delivery = CodeDelivery.unreachable
+                case _ as endpoint:
+                    assert_never(endpoint)
+            match delivery:
+                case CodeDelivery.delivered:
+                    return True
+                case CodeDelivery.unreachable:
+                    if self.read_clock() >= deadline:
+                        return False
+                    self.sleep(self.settings.job_code_poll_seconds)
+                case _:
+                    assert_never(delivery)
 
     def sync(self, name: str) -> JobRecord:
         record = self.read(name)
         match record.status:
             case Pending(submitted_at=submitted_at):
                 return self.finish(
-                    record.spec,
+                    record,
                     [],
                     Aborted(
                         submitted_at=submitted_at,
@@ -133,9 +202,7 @@ class JobOrchestrator:
                     case Active():
                         return record
                     case Completed() | Halted():
-                        return self.finish(
-                            record.spec, [instance_id], conclude(running, self.read_clock(), observation)
-                        )
+                        return self.finish(record, [instance_id], conclude(running, self.read_clock(), observation))
                     case _:
                         assert_never(observation)
             case Succeeded() | Failed() | Aborted():
@@ -162,7 +229,7 @@ class JobOrchestrator:
             case _:
                 assert_never(record.status)
         finished = self.finish(
-            record.spec,
+            record,
             known_instances,
             Aborted(submitted_at=submitted_at, finished_at=self.read_clock(), reason="abandoned by the operator"),
         )
@@ -173,7 +240,7 @@ class JobOrchestrator:
             case None:
                 return None
             case str() as remote_directory:
-                endpoint = self.provider.find_ssh_endpoint(instance_id)
+                endpoint = self.require_ssh_endpoint(instance_id)
                 return self.downloader.download(spec.name, endpoint, remote_directory)
             case _:
                 assert_never(spec.artifacts_directory)
@@ -182,11 +249,22 @@ class JobOrchestrator:
         record = self.read(name)
         match record.status:
             case Running(instance_id=instance_id):
-                return self.provider.find_ssh_endpoint(instance_id)
+                return self.require_ssh_endpoint(instance_id)
             case Pending() | Succeeded() | Failed() | Aborted():
                 raise CommandError(f"Job {name} is {record.status.condition}, so it has no instance to connect to.")
             case _:
                 assert_never(record.status)
+
+    def require_ssh_endpoint(self, instance_id: int) -> SshEndpoint:
+        match self.provider.find_ssh_endpoint(instance_id):
+            case SshEndpoint() as endpoint:
+                return endpoint
+            case None:
+                raise CommandError(
+                    f"Instance {instance_id} does not map the SSH port {self.settings.vast_ssh_port} to a public port."
+                )
+            case _ as endpoint:
+                assert_never(endpoint)
 
     def read(self, name: str) -> JobRecord:
         record = self.read_latest(name)
@@ -228,12 +306,14 @@ class JobOrchestrator:
             submitted_at=pending.submitted_at, finished_at=self.read_clock(), reason="no offer was available to rent"
         )
 
-    def finish(self, spec: JobSpec, known_instances: Sequence[int], status: Succeeded | Failed | Aborted) -> JobRecord:
-        self.destroy_instances(spec.name, known_instances)
-        self.access_keys.remove(spec.name)
-        record = JobRecord(spec=spec, status=status)
-        self.record_transition(record)
-        return record
+    def finish(
+        self, record: JobRecord, known_instances: Sequence[int], status: Succeeded | Failed | Aborted
+    ) -> JobRecord:
+        self.destroy_instances(record.spec.name, known_instances)
+        self.access_keys.remove(record.spec.name)
+        finished = record.model_copy(update={"status": status})
+        self.record_transition(finished)
+        return finished
 
     def destroy_instances(self, job_name: str, known_instances: Sequence[int]) -> None:
         for instance_id in known_instances:
