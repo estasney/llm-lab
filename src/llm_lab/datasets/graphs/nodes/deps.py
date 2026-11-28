@@ -4,7 +4,7 @@ from typing import Annotated
 from openai import AsyncOpenAI
 from pregel_redux import Depends, Scope
 
-from llm_lab.datasets.graphs.nodes.chat import ChatModel, OpenAIChatModel, find_served_model
+from llm_lab.datasets.graphs.nodes.models.chat import ChatModel, OpenAIChatModel, find_served_model
 from llm_lab.settings import Settings, get_settings
 
 
