@@ -2,7 +2,7 @@ from collections.abc import Sequence
 from typing import Annotated, Literal, Protocol, assert_never
 
 from openai import AsyncOpenAI
-from openai.types import CompletionUsage, Model
+from openai.types import CompletionUsage
 from openai.types.chat import (
     ChatCompletionFunctionToolParam,
     ChatCompletionMessage,
@@ -68,6 +68,10 @@ class Completion(BaseModel):
 
 class ChatModel(Protocol):
     async def complete(self, messages: Sequence[ChatMessage], tools: Sequence[FunctionTool] = ()) -> Completion: ...
+
+
+class ChatModelFactory(Protocol):
+    def create(self, model: str) -> ChatModel: ...
 
 
 def to_openai_tool(tool: FunctionTool) -> ChatCompletionFunctionToolParam:
@@ -147,15 +151,6 @@ def from_openai_usage(usage: CompletionUsage | None) -> Usage:
             assert_never(usage)
 
 
-async def find_served_model(client: AsyncOpenAI) -> str:
-    page = await client.models.list()
-    match page.data:
-        case [Model(id=model)]:
-            return model
-        case models:
-            raise ValueError(f"the server serves {len(models)} models, and a chat model needs exactly one")
-
-
 class OpenAIChatModel:
     def __init__(self, client: AsyncOpenAI, model: str) -> None:
         self.client = client
@@ -168,3 +163,11 @@ class OpenAIChatModel:
             tools=[to_openai_tool(tool) for tool in tools],
         )
         return Completion(message=from_openai_choices(completion.choices), usage=from_openai_usage(completion.usage))
+
+
+class OpenAIChatModelFactory:
+    def __init__(self, client: AsyncOpenAI) -> None:
+        self.client = client
+
+    def create(self, model: str) -> ChatModel:
+        return OpenAIChatModel(self.client, model)

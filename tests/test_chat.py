@@ -2,7 +2,6 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
-from contextlib import nullcontext as does_not_raise
 
 import httpx2
 import openai
@@ -17,12 +16,12 @@ from llm_lab.datasets.graphs.nodes.models.chat import (
     FunctionCall,
     FunctionTool,
     OpenAIChatModel,
+    OpenAIChatModelFactory,
     SystemMessage,
     ToolCall,
     ToolMessage,
     Usage,
     UserMessage,
-    find_served_model,
 )
 
 
@@ -45,13 +44,6 @@ def build_completion(choices: list[JsonValue]) -> dict[str, JsonValue]:
         "model": "served",
         "choices": choices,
         "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
-    }
-
-
-def build_model_list(names: list[str]) -> dict[str, JsonValue]:
-    return {
-        "object": "list",
-        "data": [{"id": name, "object": "model", "created": 0, "owned_by": "vllm"} for name in names],
     }
 
 
@@ -292,23 +284,19 @@ def test_chat_model_rejects_a_response_without_one_finished_reply_and_its_usage(
         run_with_client(response, lambda client: OpenAIChatModel(client, "served").complete(messages))
 
 
-@pytest.mark.parametrize(
-    ("names", "expectation"),
-    [
-        pytest.param(["Qwen/Qwen3-8B"], does_not_raise(), id="one model"),
-        pytest.param([], pytest.raises(ValueError), id="no model"),
-        pytest.param(["Qwen/Qwen3-8B", "Qwen/Qwen3-32B"], pytest.raises(ValueError), id="two models"),
-    ],
-)
-def test_served_model_is_the_only_model_of_the_server(
-    names: list[str], expectation: AbstractContextManager[object]
-) -> None:
+@pytest.mark.parametrize("model", ["Qwen/Qwen3-8B", "Qwen/Qwen3.8-27B-FP8"])
+def test_factory_creates_a_chat_model_for_the_given_model(model: str) -> None:
     """
-    Arrange: a server that lists no model, one model or two models.
-    Act: find the served model.
-    Assert: the result is the name of the model when the server lists one model, and otherwise an error.
+    Arrange: a chat model factory whose server replies with one choice that stopped by itself.
+    Act: create a chat model for a model name, and complete one user message.
+    Assert: the request names the given model.
     """
-    with expectation:
-        actual = run_with_client(httpx2.Response(200, json=build_model_list(names)), find_served_model)
+    requests: list[httpx2.Request] = []
+    response = httpx2.Response(200, json=build_completion([build_choice("Hi", "stop")]))
+    messages = [UserMessage(content="Hello")]
 
-        assert actual == names[0], f"Expected the only listed model, {names[0]!r}, got {actual!r}"
+    run_with_client(response, lambda client: OpenAIChatModelFactory(client).create(model).complete(messages), requests)
+
+    [request] = requests
+    actual = json.loads(request.content)["model"]
+    assert actual == model, f"Expected the request to name {model!r}, got {actual!r}"
