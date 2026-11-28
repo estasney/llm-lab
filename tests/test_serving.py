@@ -36,6 +36,12 @@ def build_server(port: int, startup_timeout_seconds: float = 30) -> VllmServer:
 
 
 def test_command_serves_the_model_on_the_loopback_port_with_the_recipe_arguments_last(recipe: Recipe) -> None:
+    """
+    Arrange: a recipe that serves Qwen/Qwen3-8B with the vLLM arguments "--tensor-parallel-size 2".
+    Act: build the vLLM command for the port 8123.
+    Assert: the command is "vllm serve" with the model, the host 127.0.0.1 and the port 8123, and then the
+        vLLM arguments of the recipe.
+    """
     actual = build_vllm_command(recipe, 8123)
 
     expected = [
@@ -55,6 +61,12 @@ def test_command_serves_the_model_on_the_loopback_port_with_the_recipe_arguments
 def test_serve_waits_for_health_and_stops_the_server_on_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recipe: Recipe
 ) -> None:
+    """
+    Arrange: a fake vllm program on the PATH that serves HTTP on the given port and returns status 200 for
+        /health, and a free port.
+    Act: serve the recipe and request /health in the with block.
+    Assert: /health returns status 200 in the block, and a connection to the port fails after the block.
+    """
     healthy_server = """
     import sys
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -80,6 +92,11 @@ def test_serve_waits_for_health_and_stops_the_server_on_exit(
 def test_serve_raises_the_exit_status_of_a_server_that_stops_while_loading(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recipe: Recipe
 ) -> None:
+    """
+    Arrange: a fake vllm program on the PATH that exits with status 3 when it starts.
+    Act: serve the recipe.
+    Assert: serve raises a RuntimeError that gives the exit status 3, and the with block does not run.
+    """
     install_fake_vllm(tmp_path, monkeypatch, "raise SystemExit(3)")
 
     with pytest.raises(RuntimeError, match="status 3"), build_server(find_free_port()).serve(recipe):
@@ -89,6 +106,13 @@ def test_serve_raises_the_exit_status_of_a_server_that_stops_while_loading(
 def test_serve_stops_a_server_that_is_not_healthy_in_time(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recipe: Recipe
 ) -> None:
+    """
+    Arrange: a fake vllm program on the PATH that writes its process ID to a file and then waits for 60 seconds
+        without an HTTP server, and a startup timeout of 0.5 seconds.
+    Act: serve the recipe.
+    Assert: serve raises a TimeoutError, the with block does not run, and the process of the fake program is
+        stopped.
+    """
     pid_file = tmp_path / "pid"
     install_fake_vllm(
         tmp_path, monkeypatch, f"import os, time\nopen({str(pid_file)!r}, 'w').write(str(os.getpid()))\ntime.sleep(60)"
