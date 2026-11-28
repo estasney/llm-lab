@@ -46,6 +46,11 @@ def complete_with(
     ],
 )
 def test_chat_model_posts_the_messages_and_returns_the_content(messages: list[ChatMessage], content: str) -> None:
+    """
+    Arrange: a chat model whose HTTP transport replies with one finished choice.
+    Act: complete the messages.
+    Assert: the request posts the messages to the chat completions path, and the result is the content of the choice.
+    """
     requests: list[httpx.Request] = []
 
     actual = complete_with(httpx.Response(200, json={"choices": [build_choice(content, "stop")]}), messages, requests)
@@ -78,5 +83,11 @@ def test_chat_model_posts_the_messages_and_returns_the_content(messages: list[Ch
 def test_chat_model_rejects_a_response_without_one_finished_reply(
     response: httpx.Response, expectation: AbstractContextManager[object]
 ) -> None:
+    """
+    Arrange: a chat model whose HTTP transport replies with an error status, a reply that reached the token limit,
+        no choice or two choices.
+    Act: complete one user message.
+    Assert: the chat model raises an error instead of returning a reply.
+    """
     with expectation:
         complete_with(response, [ChatMessage(role=Role.user, content="Hello")])

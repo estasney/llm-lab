@@ -56,6 +56,11 @@ def prompt_kind(request: pytest.FixtureRequest) -> PromptKind:
 def test_node_writes_the_reply_of_the_model_as_the_user_prompt(
     prompt_kind: PromptKind, source_text: str, reply: str
 ) -> None:
+    """
+    Arrange: a graph whose only node writes the user prompt, with a chat model that gives a fixed reply.
+    Act: run the graph on a source text and a prompt kind.
+    Assert: the output of the graph has the reply of the chat model as the user prompt.
+    """
     chat = RecordingChatModel(reply)
 
     actual = run_user_prompt_graph(chat, UserPromptInput(source_text=source_text, prompt_kind=prompt_kind))
@@ -75,6 +80,12 @@ def test_node_writes_the_reply_of_the_model_as_the_user_prompt(
 def test_node_sends_one_user_message_with_the_source_text_and_the_prompt_kind(
     prompt_kind: PromptKind, source_text: str
 ) -> None:
+    """
+    Arrange: a graph whose only node writes the user prompt, with a chat model that records its requests.
+    Act: run the graph on a source text and a prompt kind.
+    Assert: the chat model gets one user message that contains the source text and the description of the
+        prompt kind.
+    """
     chat = RecordingChatModel("Summarize this.")
 
     run_user_prompt_graph(chat, UserPromptInput(source_text=source_text, prompt_kind=prompt_kind))
@@ -88,6 +99,11 @@ def test_node_sends_one_user_message_with_the_source_text_and_the_prompt_kind(
 
 
 def test_each_prompt_kind_has_its_own_description() -> None:
+    """
+    Arrange: all prompt kinds.
+    Act: describe each prompt kind.
+    Assert: no two prompt kinds have the same description.
+    """
     descriptions = [describe_prompt_kind(kind) for kind in PromptKind]
 
     assert len(set(descriptions)) == len(descriptions), f"Two prompt kinds share a description: {descriptions}"
