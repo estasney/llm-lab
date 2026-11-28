@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     vllm_poll_seconds: PositiveFloat = Field(
         default=5, description="Delay in seconds between two health checks of vLLM.", examples=[5, 0.5]
     )
+    vllm_api_key: SecretStr = Field(
+        default=SecretStr("NOT_REQUIRED"),
+        description="API key that the chat models of the graph nodes send to vLLM. vLLM checks the key only when vLLM "
+        "starts with --api-key.",
+    )
     vllm_request_timeout_seconds: PositiveFloat = Field(
         default=600,
         description="Time limit in seconds for one chat completion request to vLLM.",
