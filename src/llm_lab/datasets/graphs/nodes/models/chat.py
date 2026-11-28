@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Annotated, Literal, Protocol, assert_never
 
 from openai import AsyncOpenAI
@@ -70,8 +70,7 @@ class ChatModel(Protocol):
     async def complete(self, messages: Sequence[ChatMessage], tools: Sequence[FunctionTool] = ()) -> Completion: ...
 
 
-class ChatModelFactory(Protocol):
-    def create(self, model: str) -> ChatModel: ...
+type ChatModelFactory = Callable[[str], ChatModel]
 
 
 def to_openai_tool(tool: FunctionTool) -> ChatCompletionFunctionToolParam:
@@ -163,11 +162,3 @@ class OpenAIChatModel:
             tools=[to_openai_tool(tool) for tool in tools],
         )
         return Completion(message=from_openai_choices(completion.choices), usage=from_openai_usage(completion.usage))
-
-
-class OpenAIChatModelFactory:
-    def __init__(self, client: AsyncOpenAI) -> None:
-        self.client = client
-
-    def create(self, model: str) -> ChatModel:
-        return OpenAIChatModel(self.client, model)

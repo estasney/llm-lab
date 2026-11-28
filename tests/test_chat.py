@@ -16,7 +16,6 @@ from llm_lab.datasets.graphs.nodes.models.chat import (
     FunctionCall,
     FunctionTool,
     OpenAIChatModel,
-    OpenAIChatModelFactory,
     SystemMessage,
     ToolCall,
     ToolMessage,
@@ -282,21 +281,3 @@ def test_chat_model_rejects_a_response_without_one_finished_reply_and_its_usage(
 
     with expectation:
         run_with_client(response, lambda client: OpenAIChatModel(client, "served").complete(messages))
-
-
-@pytest.mark.parametrize("model", ["Qwen/Qwen3-8B", "Qwen/Qwen3.8-27B-FP8"])
-def test_factory_creates_a_chat_model_for_the_given_model(model: str) -> None:
-    """
-    Arrange: a chat model factory whose server replies with one choice that stopped by itself.
-    Act: create a chat model for a model name, and complete one user message.
-    Assert: the request names the given model.
-    """
-    requests: list[httpx2.Request] = []
-    response = httpx2.Response(200, json=build_completion([build_choice("Hi", "stop")]))
-    messages = [UserMessage(content="Hello")]
-
-    run_with_client(response, lambda client: OpenAIChatModelFactory(client).create(model).complete(messages), requests)
-
-    [request] = requests
-    actual = json.loads(request.content)["model"]
-    assert actual == model, f"Expected the request to name {model!r}, got {actual!r}"
