@@ -7,8 +7,9 @@ import httpx
 
 from llm_lab.cli.db.deps import DatabaseSessionDep
 from llm_lab.dependencies import Depends
-from llm_lab.jobs.access import JobAccessStore, RsyncDownloader
-from llm_lab.jobs.orchestrator import ArtifactDownloader, InstanceProvider, JobOrchestrator
+from llm_lab.jobs.access import JobAccessStore, RsyncDownloader, RsyncUploader
+from llm_lab.jobs.code import WorkspaceCodeSource
+from llm_lab.jobs.orchestrator import ArtifactDownloader, CodeUploader, InstanceProvider, JobOrchestrator
 from llm_lab.jobs.vast import VastInstanceProvider
 from llm_lab.secrets import SettingsSecretSource
 from llm_lab.settings import SettingsDep
@@ -43,15 +44,32 @@ def get_artifact_downloader(settings: SettingsDep, access: JobAccessStoreDep) ->
 type ArtifactDownloaderDep = Annotated[ArtifactDownloader, Depends(get_artifact_downloader)]
 
 
+def get_code_uploader(settings: SettingsDep, access: JobAccessStoreDep) -> CodeUploader:
+    return RsyncUploader(settings, access)
+
+
+type CodeUploaderDep = Annotated[CodeUploader, Depends(get_code_uploader)]
+
+
 def get_job_orchestrator(
     settings: SettingsDep,
     provider: InstanceProviderDep,
     session: DatabaseSessionDep,
     access: JobAccessStoreDep,
+    uploader: CodeUploaderDep,
     downloader: ArtifactDownloaderDep,
 ) -> JobOrchestrator:
     return JobOrchestrator(
-        provider, session, SettingsSecretSource(settings), access, downloader, lambda: datetime.now(UTC)
+        settings,
+        provider,
+        session,
+        SettingsSecretSource(settings),
+        access,
+        WorkspaceCodeSource(settings),
+        uploader,
+        downloader,
+        lambda: datetime.now(UTC),
+        time.sleep,
     )
 
 

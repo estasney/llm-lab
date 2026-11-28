@@ -86,51 +86,32 @@ class Settings(BaseSettings):
         description="Directory where `llm-lab jobs destroy` puts the files that it downloads from each job.",
         examples=[".llm-lab/downloads"],
     )
-    datasets_image: str | None = Field(
-        default=None,
-        description="Reference of the published datasets image that a dataset job runs.",
-        examples=["ghcr.io/example/llm-lab-datasets:0.1.2"],
+    workspace_dir: Path = Field(
+        default=Path(),
+        description="Root directory of the uv workspace whose members hold the code of jobs.",
+        examples=[".", "/home/me/llm-lab"],
     )
-    seed_bucket_name: str = Field(
-        default="llm-lab-seeds",
-        description="Name of the Hub bucket that receives the local seed files of a recipe. "
-        "The bucket is in the namespace of the dataset.",
-        examples=["llm-lab-seeds"],
+    job_code_directory: str = Field(
+        default="/workspace/code",
+        pattern=r"^/",
+        description="Directory on the instance that receives the code of a job.",
+        examples=["/workspace/code"],
     )
-    artifacts_dir: Path = Field(
-        default=Path(".llm-lab/artifacts"),
-        description="Directory where Data Designer writes the generated datasets.",
-        examples=[".llm-lab/artifacts", "/workspace/artifacts"],
+    job_code_timeout_seconds: PositiveInt = Field(
+        default=900,
+        description="Time limit in seconds for the code of a job to reach its instance. After it, `llm-lab jobs "
+        "submit` destroys the instance, and an instance that still waits reports the exit code 124.",
+        examples=[900],
     )
-    vllm_port: PositiveInt = Field(
-        default=8000, description="Port of the vLLM server on the loopback interface.", examples=[8000]
-    )
-    vllm_startup_timeout_seconds: PositiveFloat = Field(
-        default=3600,
-        description="Time limit in seconds for vLLM to download and load the model.",
-        examples=[3600],
-    )
-    vllm_poll_seconds: PositiveFloat = Field(
-        default=5, description="Delay in seconds between two health checks of vLLM.", examples=[5, 0.5]
-    )
-    vllm_api_key: SecretStr = Field(
-        default=SecretStr("NOT_REQUIRED"),
-        description="API key for vLLM.",
-    )
-    vllm_request_timeout_seconds: PositiveFloat = Field(
-        default=600,
-        description="Time limit in seconds for one chat completion request to vLLM.",
-        examples=[600],
-    )
-    vllm_stop_timeout_seconds: PositiveFloat = Field(
-        default=60,
-        description="Time in seconds that vLLM gets to stop before it is killed.",
-        examples=[60],
+    job_code_poll_seconds: PositiveFloat = Field(
+        default=10,
+        description="Delay in seconds between two attempts to upload the code of a job to its instance.",
+        examples=[10, 2.5],
     )
 
     @property
-    def vllm_base_url(self) -> str:
-        return f"http://127.0.0.1:{self.vllm_port}"
+    def job_code_marker(self) -> str:
+        return f"{self.job_code_directory.rstrip('/')}/.llm-lab-code-complete"
 
     @classmethod
     def settings_customise_sources(

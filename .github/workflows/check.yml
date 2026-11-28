@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
-    paths: ['src/**', 'pyproject.toml', 'uv.lock', 'Makefile', '.github/workflows/check.yml']
+    paths: ['packages/**', 'jobs/**', 'tests/**', 'pyproject.toml', 'uv.lock', 'Makefile', '.github/workflows/check.yml']
 
 permissions:
   contents: read

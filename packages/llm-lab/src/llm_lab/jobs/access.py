@@ -1,14 +1,18 @@
+import math
 import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+from typing import assert_never
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 from pydantic import SecretStr
 
 from llm_lab.errors import CommandError
+from llm_lab.jobs.protocol import JobCode
 from llm_lab.settings import Settings
 
 
@@ -28,6 +32,11 @@ class InstanceAccess:
 class SshEndpoint:
     host: str
     port: int
+
+
+class CodeDelivery(StrEnum):
+    delivered = "delivered"
+    unreachable = "unreachable"
 
 
 def generate_key_pair() -> KeyPair:
@@ -112,3 +121,47 @@ class RsyncDownloader:
                 f"Run the command again, or destroy the job with --no-download."
             )
         return local_directory
+
+
+class RsyncUploader:
+    def __init__(self, settings: Settings, access: JobAccessStore) -> None:
+        self.settings = settings
+        self.access = access
+
+    def run(self, command: list[str], input: str | None) -> CodeDelivery:
+        try:
+            status = subprocess.run(command, check=False, input=input, text=True).returncode
+        except FileNotFoundError as error:
+            raise CommandError(
+                f"{command[0]} is not installed. llm-lab needs it to upload the code of a job."
+            ) from error
+        match status:
+            case 0:
+                return CodeDelivery.delivered
+            case 255:
+                return CodeDelivery.unreachable
+            case _:
+                raise CommandError(f"{command[0]} exited with status {status} during the upload of the job code.")
+
+    def upload(self, job_name: str, endpoint: SshEndpoint, code: JobCode) -> CodeDelivery:
+        *ssh, host = self.access.build_ssh_command(job_name, endpoint)
+        ssh += ["-o", "BatchMode=yes", "-o", f"ConnectTimeout={math.ceil(self.settings.job_code_poll_seconds)}"]
+        directory = self.settings.job_code_directory.rstrip("/")
+        copy = [
+            "rsync",
+            "--archive",
+            "--compress",
+            "--from0",
+            "--files-from=-",
+            "--rsh",
+            shlex.join(ssh),
+            f"{code.root}/",
+            f"{host}:{directory}/",
+        ]
+        match self.run(copy, "\0".join(code.files)):
+            case CodeDelivery.delivered:
+                return self.run([*ssh, host, shlex.join(["touch", self.settings.job_code_marker])], None)
+            case CodeDelivery.unreachable:
+                return CodeDelivery.unreachable
+            case _ as delivery:
+                assert_never(delivery)

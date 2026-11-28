@@ -4,12 +4,12 @@ from typing import Annotated
 from openai import AsyncOpenAI
 from pregel_redux import Depends, Scope
 
-from llm_lab.datasets.graphs.nodes.models.chat import ChatModel, ChatModelFactory, OpenAIChatModel
-from llm_lab.settings import Settings, get_settings
+from llm_lab_runtime.chat import ChatModel, ChatModelFactory, OpenAIChatModel
+from llm_lab_runtime.settings import RuntimeSettings, get_runtime_settings
 
 
 async def get_oai_model_factory(
-    settings: Annotated[Settings, Depends(get_settings, scope=Scope.run)],
+    settings: Annotated[RuntimeSettings, Depends(get_runtime_settings, scope=Scope.run)],
 ) -> AsyncIterator[ChatModelFactory]:
     async with AsyncOpenAI(
         base_url=f"{settings.vllm_base_url}/v1",

@@ -7,8 +7,10 @@ ARG TORCH_BACKEND=cu130
 FROM ${UV_IMAGE} AS uv
 
 # vLLM compiles GPU kernels at runtime with nvcc, so the image keeps the CUDA toolkit.
-FROM ${CUDA_IMAGE} AS runtime
+FROM ${CUDA_IMAGE}
 ARG PYTHON_VERSION
+ARG VLLM_VERSION
+ARG TORCH_BACKEND
 
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -25,45 +27,20 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_INSTALL_DIR=/opt/python \
     UV_PYTHON_PREFERENCE=only-managed
 
-FROM runtime AS builder
-ARG PYTHON_VERSION
-
+# A job installs its locked dependencies with uv when it starts, so the image keeps uv and one Python.
 COPY --from=uv /uv /uvx /bin/
-
 RUN uv python install "${PYTHON_VERSION}"
 
-WORKDIR /opt/llm-lab
+# The vLLM environment is about 20 GB.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-install-project --no-editable
-
-COPY pyproject.toml uv.lock README.md ./
-COPY src ./src
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-editable
-
-FROM runtime
-ARG VLLM_VERSION
-ARG TORCH_BACKEND
-
-COPY --from=builder /opt/python /opt/python
-
-# The vLLM environment is about 20 GB. These steps mount uv, so no builder stage holds a second copy.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,from=uv,source=/uv,target=/bin/uv \
     uv venv /opt/vllm \
  && uv pip install --python /opt/vllm --torch-backend "${TORCH_BACKEND}" "vllm==${VLLM_VERSION}"
 
-RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,from=uv,source=/uv,target=/bin/uv \
-    /opt/vllm/bin/flashinfer download-kernels
+RUN /opt/vllm/bin/flashinfer download-kernels
 
-COPY --from=builder /opt/llm-lab/.venv /opt/llm-lab/.venv
-COPY --chmod=755 docker/datasets/dataset-job.sh /usr/local/bin/llm-lab-dataset-job
-COPY --chmod=755 docker/datasets/entrypoint.sh /usr/local/bin/llm-lab-entrypoint
+COPY --chmod=755 docker/base/entrypoint.sh /usr/local/bin/llm-lab-entrypoint
 
-ENV PATH=/opt/llm-lab/.venv/bin:/opt/vllm/bin:$PATH \
+ENV PATH=/opt/vllm/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     LANG=C.UTF-8 \
     CUDA_HOME=/usr/local/cuda

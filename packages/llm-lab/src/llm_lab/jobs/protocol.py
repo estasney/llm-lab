@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, Self, assert_never
 
 import pycountry
@@ -25,6 +26,7 @@ class JobCondition(StrEnum):
 
 
 type JobName = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")]
+type PackageName = Annotated[str, Field(pattern=r"^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$")]
 type EnvironmentName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 type CountryCode = Annotated[
     CountryAlpha2,
@@ -93,6 +95,12 @@ class JobSpec(BaseModel):
     name: JobName
     image: Annotated[str, Field(min_length=1)]
     command: Annotated[tuple[str, ...], Field(min_length=1)]
+    package: PackageName | None = Field(
+        default=None,
+        description="Member of the uv workspace that holds the code of the job. llm-lab uploads the member and the "
+        "members that it depends on to the instance, and runs the command there with `uv run`. Without it, the "
+        "command runs as written and the image must hold all code.",
+    )
     environment: Mapping[EnvironmentName, str] = Field(default_factory=dict)
     secret_environment: tuple[SecretName, ...] = ()
     disk_gb: PositiveFloat
@@ -156,6 +164,16 @@ class JobRecord(BaseModel):
 
     spec: JobSpec
     status: Annotated[Pending | Running | Succeeded | Failed | Aborted, Field(discriminator="condition")]
+    code_digest: str | None = Field(
+        default=None, description="SHA-256 digest of the names and contents of the code files that the job received."
+    )
+
+
+@dataclass(frozen=True)
+class JobCode:
+    root: Path
+    files: tuple[str, ...]
+    digest: str
 
 
 @dataclass(frozen=True)

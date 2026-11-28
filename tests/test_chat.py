@@ -9,7 +9,7 @@ import pytest
 from openai import AsyncOpenAI
 from pydantic import JsonValue
 
-from llm_lab.datasets.graphs.nodes.models.chat import (
+from llm_lab_runtime.chat import (
     AssistantMessage,
     ChatMessage,
     Completion,

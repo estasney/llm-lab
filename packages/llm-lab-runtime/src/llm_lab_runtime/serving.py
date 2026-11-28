@@ -1,21 +1,15 @@
 import subprocess
 import time
-from collections.abc import Generator
-from contextlib import AbstractContextManager, contextmanager
-from typing import Protocol
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 
 import httpx
 
-from llm_lab.datasets.recipe import Recipe
-from llm_lab.settings import Settings
+from llm_lab_runtime.settings import RuntimeSettings
 
 
-class ModelServer(Protocol):
-    def serve(self, recipe: Recipe) -> AbstractContextManager[None]: ...
-
-
-def build_vllm_command(recipe: Recipe, port: int) -> list[str]:
-    return ["vllm", "serve", recipe.served_model, "--host", "127.0.0.1", "--port", str(port), *recipe.vllm_args]
+def build_vllm_command(model: str, vllm_args: Sequence[str], port: int) -> list[str]:
+    return ["vllm", "serve", model, "--host", "127.0.0.1", "--port", str(port), *vllm_args]
 
 
 def is_healthy(http: httpx.Client) -> bool:
@@ -26,7 +20,7 @@ def is_healthy(http: httpx.Client) -> bool:
 
 
 class VllmServer:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: RuntimeSettings) -> None:
         self.settings = settings
 
     def wait_until_ready(self, process: subprocess.Popen[bytes]) -> None:
@@ -41,8 +35,8 @@ class VllmServer:
         raise RuntimeError(f"vLLM exited with status {status} before it was ready")
 
     @contextmanager
-    def serve(self, recipe: Recipe) -> Generator[None]:
-        with subprocess.Popen(build_vllm_command(recipe, self.settings.vllm_port)) as process:
+    def serve(self, model: str, vllm_args: Sequence[str] = ()) -> Generator[None]:
+        with subprocess.Popen(build_vllm_command(model, vllm_args, self.settings.vllm_port)) as process:
             try:
                 self.wait_until_ready(process)
                 yield

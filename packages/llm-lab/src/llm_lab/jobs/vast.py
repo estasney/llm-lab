@@ -50,8 +50,8 @@ class PortBinding(BaseModel):
 
 
 class InstanceAddress(BaseModel):
-    public_ipaddr: str
-    ports: dict[str, list[PortBinding]]
+    public_ipaddr: str | None = None
+    ports: dict[str, list[PortBinding]] | None = None
 
 
 class AddressEnvelope(BaseModel):
@@ -113,8 +113,25 @@ def build_offer_query(request: ResourceRequest, disk_gb: float, limit: int) -> d
     }
 
 
+def build_job_command(spec: JobSpec, settings: Settings) -> str:
+    match spec.package:
+        case None:
+            return shlex.join(spec.command)
+        case str() as package:
+            wait = f"until [ -e {shlex.quote(settings.job_code_marker)} ]; do sleep 1; done"
+            return " && ".join(
+                [
+                    f"timeout {settings.job_code_timeout_seconds} sh -c {shlex.quote(wait)}",
+                    f"cd {shlex.quote(settings.job_code_directory)}",
+                    shlex.join(["uv", "run", "--locked", "--package", package, "--", *spec.command]),
+                ]
+            )
+        case _:
+            assert_never(spec.package)
+
+
 def build_instance_request(
-    spec: JobSpec, secrets: Mapping[SecretName, SecretStr], access: InstanceAccess, api_url: str, ssh_port: int
+    spec: JobSpec, secrets: Mapping[SecretName, SecretStr], access: InstanceAccess, settings: Settings
 ) -> dict[str, object]:
     # Vast.ai overwrites /root/.ssh/authorized_keys after the container starts.
     script = "\n".join(
@@ -125,19 +142,19 @@ def build_instance_request(
             "printf '%s\\n' \"$LLM_LAB_SSH_AUTHORIZED_KEY\" > /run/sshd/llm-lab-authorized-keys",
             "(umask 077 && printf '%s' \"$LLM_LAB_SSH_HOST_KEY\" | base64 -d > /run/sshd/llm-lab-host-key)",
             'printf \'export PATH="%s"\\n\' "$PATH" > /etc/profile.d/llm-lab-path.sh',
-            f'"$(command -v sshd)" -p {ssh_port} -h /run/sshd/llm-lab-host-key '
+            f'"$(command -v sshd)" -p {settings.vast_ssh_port} -h /run/sshd/llm-lab-host-key '
             "-o 'AuthorizedKeysFile=/run/sshd/llm-lab-authorized-keys .ssh/authorized_keys' "
             "-o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o PermitRootLogin=prohibit-password",
             "fi",
             "if [ ! -e /llm-lab-job-done ]; then",
-            shlex.join(spec.command),
+            build_job_command(spec, settings),
             "exit_code=$?",
             "touch /llm-lab-job-done",
             'echo "llm-lab-job-exit-code=$exit_code"',
             "fi",
             f"sleep {spec.ttl_seconds_after_finished}",
             'curl -fsS -X DELETE -H "Authorization: Bearer $CONTAINER_API_KEY" '
-            f'"{api_url}/v0/instances/$CONTAINER_ID/"',
+            f'"{settings.vast_api_url}/v0/instances/$CONTAINER_ID/"',
         ]
     )
     return {
@@ -152,7 +169,7 @@ def build_instance_request(
             **{name: secret.get_secret_value() for name, secret in secrets.items()},
             "LLM_LAB_SSH_AUTHORIZED_KEY": access.authorized_key,
             "LLM_LAB_SSH_HOST_KEY": base64.b64encode(access.host_private_key.get_secret_value().encode()).decode(),
-            f"-p {ssh_port}:{ssh_port}": "1",
+            f"-p {settings.vast_ssh_port}:{settings.vast_ssh_port}": "1",
         },
     }
 
@@ -201,7 +218,7 @@ class VastInstanceProvider:
         response = self.call_api(
             "PUT",
             f"/v0/asks/{offer_id}/",
-            build_instance_request(spec, secrets, access, self.settings.vast_api_url, self.settings.vast_ssh_port),
+            build_instance_request(spec, secrets, access, self.settings),
         )
         if response.status_code in {404, 410}:
             return None
@@ -230,17 +247,17 @@ class VastInstanceProvider:
             case _:
                 return classify(view.actual_status, None)
 
-    def find_ssh_endpoint(self, instance_id: int) -> SshEndpoint:
+    def find_ssh_endpoint(self, instance_id: int) -> SshEndpoint | None:
         response = self.call_api("GET", f"/v0/instances/{instance_id}/", None)
         self.require_success(response)
         address = AddressEnvelope.model_validate_json(response.content).instances
+        if address.public_ipaddr is None or address.ports is None:
+            return None
         match address.ports.get(f"{self.settings.vast_ssh_port}/tcp", []):
             case [binding, *_]:
                 return SshEndpoint(host=address.public_ipaddr, port=binding.host_port)
             case _:
-                raise CommandError(
-                    f"Instance {instance_id} does not map the SSH port {self.settings.vast_ssh_port} to a public port."
-                )
+                return None
 
     def find_instances(self, job_name: str) -> Sequence[int]:
         params = {
