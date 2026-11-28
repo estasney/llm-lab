@@ -73,6 +73,14 @@ def stored() -> RepositoryMetadata:
 def test_run_files_get_names_of_the_run_beside_the_stored_files(
     run: GeneratedRun, stored: RepositoryMetadata, recipe: Recipe
 ) -> None:
+    """
+    Arrange: a run with two data files, one chat processor file and one image, a repository that has one data
+        file, and a recipe.
+    Act: plan the repository files for the run "run1".
+    Assert: the files that come from the run folder are the two data files and the chat file with the prefix
+        "run1-" in the data and chat folders, the image and builder_config.json at their paths, and recipe.yaml
+        holds the source of the recipe.
+    """
     files = plan_repository_files("sentences", "run1", run, stored, recipe)
 
     expected = {
@@ -90,6 +98,13 @@ def test_run_files_get_names_of_the_run_beside_the_stored_files(
 def test_metadata_describes_the_stored_rows_and_the_rows_of_the_run(
     run: GeneratedRun, stored: RepositoryMetadata, recipe: Recipe
 ) -> None:
+    """
+    Arrange: a run of 7 rows of 8 target rows with two data files and one chat file, and a repository of 4 rows
+        of 4 target rows with one data file.
+    Act: plan the repository files for the run "run1".
+    Assert: metadata.json has 11 rows of 12 target rows, the stored data file first and then the two data files
+        of the run, and the chat file of the run.
+    """
     files = plan_repository_files("sentences", "run1", run, stored, recipe)
 
     expected = RepositoryMetadata(
@@ -107,6 +122,12 @@ def test_metadata_describes_the_stored_rows_and_the_rows_of_the_run(
 def test_dataset_card_shows_every_data_folder_to_the_dataset_viewer(
     run: GeneratedRun, stored: RepositoryMetadata, recipe: Recipe
 ) -> None:
+    """
+    Arrange: a run of 7 rows with data files and a chat processor file, and a repository of 4 rows.
+    Act: plan the repository files for the run and read README.md.
+    Assert: the header of README.md has one config for the data folder, which is the default, and one config
+        for the chat folder, and the body gives the 11 rows of the repository.
+    """
     files = plan_repository_files("sentences", "run1", run, stored, recipe)
 
     _, header, body = read_document(files, "README.md").split("---\n", 2)
@@ -119,6 +140,13 @@ def test_dataset_card_shows_every_data_folder_to_the_dataset_viewer(
 
 
 def test_run_without_images_or_processors_adds_only_data_files(tmp_path: Path, recipe: Recipe) -> None:
+    """
+    Arrange: a run folder with one data file and its metadata, without images or processor files, and an
+        empty repository.
+    Act: plan the repository files for the run "run1".
+    Assert: the files are only the data file of the run, builder_config.json, metadata.json, README.md and
+        recipe.yaml.
+    """
     (tmp_path / "parquet-files").mkdir()
     (tmp_path / "parquet-files" / "batch_00000.parquet").write_text("rows")
     metadata = {

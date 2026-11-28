@@ -74,10 +74,20 @@ def build_runner(tmp_path: Path, port: int) -> DataDesignerRunner:
 
 
 def test_validate_accepts_a_recipe_whose_prompts_name_its_columns(tmp_path: Path, recipe: Recipe) -> None:
+    """
+    Arrange: a recipe whose prompt names only columns of the recipe.
+    Act: validate the recipe with the Data Designer runner.
+    Assert: the validation raises no error.
+    """
     build_runner(tmp_path, 8000).validate(recipe)
 
 
 def test_validate_rejects_a_prompt_that_names_a_missing_column(tmp_path: Path) -> None:
+    """
+    Arrange: a recipe whose prompt names the column season, which the recipe does not have.
+    Act: validate the recipe with the Data Designer runner.
+    Assert: the validation raises a command error that tells that Data Designer rejected the recipe.
+    """
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], prompt="Write about {{ season }}."))
 
     with pytest.raises(CommandError, match="Data Designer rejected the recipe"):
@@ -87,6 +97,13 @@ def test_validate_rejects_a_prompt_that_names_a_missing_column(tmp_path: Path) -
 def test_create_generates_the_rows_with_the_served_model(
     tmp_path: Path, recipe: Recipe, chat_server: ChatServer
 ) -> None:
+    """
+    Arrange: a local HTTP server that answers each chat completion request with the same sentence and
+        records the model of each request.
+    Act: create 4 rows of the recipe with a runner that sends its requests to that server.
+    Assert: the dataset directory is in the artifacts directory, the dataset has 4 rows, each sentence is
+        the sentence of the server, and each request names the model of the recipe.
+    """
     directory = build_runner(tmp_path, chat_server.port).create(recipe, "sentences", 4)
 
     dataset = pd.read_parquet(directory / "parquet-files")
@@ -96,6 +113,11 @@ def test_create_generates_the_rows_with_the_served_model(
 
 
 def test_create_writes_one_file_for_each_batch_of_the_recipe(tmp_path: Path, chat_server: ChatServer) -> None:
+    """
+    Arrange: a recipe with 2 rows for each batch, and a local chat completion server.
+    Act: create 4 rows of the recipe.
+    Assert: the dataset directory has 2 parquet files.
+    """
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], rows_per_batch=2))
 
     directory = build_runner(tmp_path, chat_server.port).create(recipe, "sentences", 4)
@@ -105,6 +127,12 @@ def test_create_writes_one_file_for_each_batch_of_the_recipe(tmp_path: Path, cha
 
 
 def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Path) -> None:
+    """
+    Arrange: a recipe with a Hub seed path and the shuffle sampling strategy.
+    Act: build the Data Designer config of the recipe and get its seed config.
+    Assert: the seed config reads the Hub path with the name of the Hub token secret and uses the shuffle
+        sampling strategy.
+    """
     seed = {"kind": "hub", "path": "buckets/lab/seeds/0a1b/*.parquet", "sampling_strategy": "shuffle"}
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
 
@@ -120,6 +148,11 @@ def test_config_reads_the_hub_seed_of_the_recipe_with_the_hub_token(tmp_path: Pa
 
 
 def test_designer_resolves_the_hub_token_that_a_job_receives(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Arrange: the environment variable HF_TOKEN has a value, and LLM_LAB_HF_TOKEN is not set.
+    Act: resolve the secret HF_TOKEN from the settings.
+    Assert: the result is the value of HF_TOKEN.
+    """
     monkeypatch.delenv("LLM_LAB_HF_TOKEN", raising=False)
     monkeypatch.setenv(SecretName.hf_token, "hf_secret")
 
@@ -129,6 +162,12 @@ def test_designer_resolves_the_hub_token_that_a_job_receives(monkeypatch: pytest
 
 
 def test_create_generates_one_row_for_each_local_seed_row(tmp_path: Path, chat_server: ChatServer) -> None:
+    """
+    Arrange: a local parquet seed file with 2 rows that have a season, a recipe whose prompt names the
+        season, and a local chat completion server.
+    Act: create 4 rows of the recipe.
+    Assert: the season values of the rows are the seed rows in their order, two times.
+    """
     seeds = tmp_path / "topics.parquet"
     pd.DataFrame({"season": ["winter", "summer"]}).to_parquet(seeds)
     source = build_recipe_source(

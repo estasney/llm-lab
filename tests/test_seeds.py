@@ -20,6 +20,13 @@ def write_seed_files(directory: Path, questions: dict[str, str]) -> Path:
 
 
 def test_job_recipe_reads_the_local_seeds_that_the_store_uploads(journal: Journal) -> None:
+    """
+    Arrange: a recipe with the local seed "seeds/*.parquet" and the shuffle sampling strategy, and a fake seed
+        store.
+    Act: prepare the job recipe.
+    Assert: the store receives the seed pattern, and the seed of the job recipe and the seed in its source are
+        a Hub seed at the bucket path that the store returns, with the shuffle sampling strategy.
+    """
     store = FakeSeedStore(journal)
     seed = {"kind": "local", "path": "seeds/*.parquet", "sampling_strategy": "shuffle"}
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
@@ -40,6 +47,11 @@ def test_job_recipe_reads_the_local_seeds_that_the_store_uploads(journal: Journa
     ids=["no-seed", "hub-seed"],
 )
 def test_job_recipe_without_local_seeds_is_the_recipe_as_written(journal: Journal, seed: dict[str, str] | None) -> None:
+    """
+    Arrange: a recipe without a local seed, and a fake seed store.
+    Act: prepare the job recipe.
+    Assert: the job recipe has the source and the seed of the recipe, and the seed store records no events.
+    """
     recipe = parse_recipe(build_recipe_source([build_model_config("writer")], seed=seed))
 
     job_recipe = prepare_job_recipe(recipe, HubDataset(namespace="lab", name="questions"), FakeSeedStore(journal))
@@ -50,6 +62,12 @@ def test_job_recipe_without_local_seeds_is_the_recipe_as_written(journal: Journa
 
 
 def test_job_recipe_keeps_the_data_designer_section_of_the_written_recipe(journal: Journal) -> None:
+    """
+    Arrange: the recipe recipes/concise-dpo.yaml with a local seed added at the end.
+    Act: prepare the job recipe, which writes the source of the recipe again with a Hub seed.
+    Assert: the data_designer section of the job recipe source is equal to the data_designer section of the
+        written recipe.
+    """
     written = (Path(__file__).parent.parent / "recipes" / "concise-dpo.yaml").read_text()
     recipe = parse_recipe(f"{written}\nseed:\n  kind: local\n  path: questions.parquet\n")
 
@@ -61,6 +79,11 @@ def test_job_recipe_keeps_the_data_designer_section_of_the_written_recipe(journa
 
 
 def test_seed_folder_holds_every_file_that_the_pattern_matches(tmp_path: Path) -> None:
+    """
+    Arrange: a folder with two parquet seed files.
+    Act: read the seed folder of the pattern "*.parquet" in that folder.
+    Assert: the files of the seed folder are the names of the two files with their paths.
+    """
     seeds = write_seed_files(tmp_path, {"part-0.parquet": "What is a tide?", "part-1.parquet": "Why is the sky blue?"})
 
     folder = read_seed_folder(seeds / "*.parquet")
@@ -81,6 +104,13 @@ def test_seed_folder_holds_every_file_that_the_pattern_matches(tmp_path: Path) -
 def test_seed_folder_name_follows_the_names_and_contents_of_the_files(
     tmp_path: Path, other: dict[str, str], *, same_folder: bool
 ) -> None:
+    """
+    Arrange: two folders of two seed files each, where the second folder has the same files as the first, or
+        one file with a different content or name.
+    Act: read the seed folder of each folder.
+    Assert: the two seed folders have the same name only when the names and the contents of the files are the
+        same.
+    """
     seeds = write_seed_files(
         tmp_path / "seeds", {"part-0.parquet": "What is a tide?", "part-1.parquet": "Why is the sky blue?"}
     )
@@ -92,5 +122,10 @@ def test_seed_folder_name_follows_the_names_and_contents_of_the_files(
 
 
 def test_seed_folder_needs_at_least_one_file(tmp_path: Path) -> None:
+    """
+    Arrange: an empty folder.
+    Act: read the seed folder of the pattern "*.parquet" in that folder.
+    Assert: the read raises a CommandError with the message that no seed files match.
+    """
     with pytest.raises(CommandError, match="No seed files match"):
         read_seed_folder(tmp_path / "*.parquet")
