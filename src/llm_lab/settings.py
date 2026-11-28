@@ -115,8 +115,7 @@ class Settings(BaseSettings):
     )
     vllm_api_key: SecretStr = Field(
         default=SecretStr("NOT_REQUIRED"),
-        description="API key that the chat models of the graph nodes send to vLLM. vLLM checks the key only when vLLM "
-        "starts with --api-key.",
+        description="API key for vLLM.",
     )
     vllm_request_timeout_seconds: PositiveFloat = Field(
         default=600,
