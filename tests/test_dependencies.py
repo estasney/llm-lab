@@ -390,7 +390,7 @@ def test_invalid_dependency_is_rejected_when_the_command_is_registered(
 ) -> None:
     """
     Arrange: a command that is async, whose dependencies form a cycle or are async, or that has a parameter
-        that cannot receive a dependency.
+    that cannot receive a dependency.
     Act: register the command.
     Assert: the registration raises before the command can run.
     """

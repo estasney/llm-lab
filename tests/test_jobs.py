@@ -233,16 +233,6 @@ def build_spec(placement: ResourceRequest | ExplicitOffer | None = None) -> JobS
 
 
 def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_instance_runs(workbench: Workbench) -> None:
-    """
-    Arrange: a fake Vast.ai with two offers at different prices, and a job spec that requests a GPU, sets an
-        environment variable, a secret and a command with an argument that contains a space.
-    Act: submit the job.
-    Assert: the job is running on the instance of the offer with the lowest price, no request waited for a retry, the
-        search filters on the GPU, the price ceiling and a direct port, the rent request has the image, the disk, the
-        label, the environment with the secret value and the SSH keys, and a script that starts sshd, runs the
-        quoted command one time, prints the exit code and then destroys the instance after the time to live, and
-        the record and the database have the secret name but not the secret value.
-    """
     record = workbench.orchestrator.submit(build_spec())
 
     assert record.status == Running(submitted_at=datetime(2026, 1, 1, tzinfo=UTC), instance_id=9000)
@@ -301,12 +291,6 @@ def test_submit_rents_the_offer_with_the_lowest_price_and_returns_while_the_inst
 
 
 def test_each_database_connection_has_the_sqlite_pragmas(workbench: Workbench) -> None:
-    """
-    Arrange: the migrated job database of the workbench.
-    Act: open two connections and read the foreign_keys, journal_mode, synchronous and busy_timeout pragmas on each.
-    Assert: each connection has foreign keys on, the WAL journal mode, the NORMAL synchronous level and a busy timeout
-        of 5000 milliseconds.
-    """
     with workbench.engine.connect() as first, workbench.engine.connect() as second:
         for connection in (first, second):
             pragmas = {
@@ -319,14 +303,6 @@ def test_each_database_connection_has_the_sqlite_pragmas(workbench: Workbench) -
 def test_cli_reports_expected_errors_as_one_message(
     tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """
-    Arrange: a manifest file with a job name that is not valid and no command, and a second database file that has no
-        migrations.
-    Act: submit the manifest with the CLI, then list the jobs with the CLI on the second database file.
-    Assert: the submit command exits with code 1 and prints one error that names the manifest file and each field that
-        is not valid, and the list command exits with code 1 and prints one error that tells the user to upgrade
-        the database.
-    """
     manifest = tmp_path / "job.yaml"
     manifest.write_text("name: Not/A/Name\nimage: busybox\n")
     invalid_manifest = CliRunner().invoke(app, ["jobs", "submit", str(manifest)], catch_exceptions=False)
@@ -346,12 +322,6 @@ def test_cli_reports_expected_errors_as_one_message(
 def test_cli_upgrade_reports_whether_it_applied_a_migration(
     tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """
-    Arrange: a database file that has no migrations.
-    Act: run the database upgrade command of the CLI two times.
-    Assert: the first run prints the revision that it migrated to, and the second run prints that the database is
-        already current.
-    """
     monkeypatch.setenv("LLM_LAB_JOB_DATABASE_PATH", str(tmp_path / "new.sqlite3"))
     discard_cached_settings()
 
@@ -363,23 +333,11 @@ def test_cli_upgrade_reports_whether_it_applied_a_migration(
 
 
 def test_migrations_create_the_schema_of_the_models(workbench: Workbench) -> None:
-    """
-    Arrange: a database that the migrations upgraded to the head revision.
-    Act: compare the schema of the database with the metadata of the table models.
-    Assert: the comparison finds no differences.
-    """
     with workbench.engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
 
 
 def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_code(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job whose instance first has the status loading and then the status running, and whose log
-        has no exit code.
-    Act: sync the job two times.
-    Assert: each sync returns the record of the submission, the instance is not destroyed, and the database has only
-        the pending and the running transitions.
-    """
     workbench.vast.log_text = "step 1\n"
     submitted = workbench.orchestrator.submit(build_spec())
 
@@ -395,13 +353,6 @@ def test_sync_leaves_a_job_running_while_its_command_has_not_reported_an_exit_co
 def test_sync_records_the_exit_code_and_destroys_the_instance(
     workbench: Workbench, log_text: str, status_type: type[Succeeded | Failed]
 ) -> None:
-    """
-    Arrange: a submitted job whose instance is running and whose log has an exit code.
-    Act: sync the job.
-    Assert: the status of the job is succeeded for exit code 0 and failed for a different exit code, the stored record
-        is the same, the instance is destroyed, the database has the pending, the running and the final
-        transitions, and a second sync returns the same record.
-    """
     workbench.vast.log_text = log_text
     workbench.vast.actual_statuses = iter(["running"])
     workbench.orchestrator.submit(build_spec())
@@ -416,11 +367,6 @@ def test_sync_records_the_exit_code_and_destroys_the_instance(
 
 
 def test_sync_all_finishes_each_job_that_is_not_finished(workbench: Workbench) -> None:
-    """
-    Arrange: two submitted jobs whose instances are running and whose logs have the exit code 0.
-    Act: sync all jobs.
-    Assert: the result has the two jobs in the order of their names, each job succeeded, and no instance is live.
-    """
     workbench.vast.actual_statuses = iter(["running", "running"])
     workbench.orchestrator.submit(build_spec())
     workbench.orchestrator.submit(build_spec().model_copy(update={"name": "evaluate"}))
@@ -435,11 +381,6 @@ def test_sync_all_finishes_each_job_that_is_not_finished(workbench: Workbench) -
 
 
 def test_sync_records_a_job_as_aborted_when_its_instance_destroyed_itself(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job whose instance is not on Vast.ai.
-    Act: sync the job.
-    Assert: the job is aborted, and the reason says that the instance is missing.
-    """
     workbench.orchestrator.submit(build_spec())
     workbench.vast.live_instances.clear()
 
@@ -453,12 +394,6 @@ def test_sync_records_a_job_as_aborted_when_its_instance_destroyed_itself(workbe
 def test_sync_records_a_job_as_aborted_and_destroys_the_instance_when_the_container_exited_without_an_exit_code(
     workbench: Workbench, request_logs_response: httpx.Response | None
 ) -> None:
-    """
-    Arrange: a submitted job whose instance has the status exited, and whose log has no exit code or whose log request
-        returns status 404.
-    Act: sync the job.
-    Assert: the job is aborted, the reason says that the instance exited, and the instance is destroyed.
-    """
     workbench.vast.actual_statuses = iter(["exited"])
     workbench.vast.log_text = "killed\n"
     if request_logs_response is not None:
@@ -473,11 +408,6 @@ def test_sync_records_a_job_as_aborted_and_destroys_the_instance_when_the_contai
 
 
 def test_submit_rents_the_next_offer_when_an_offer_is_not_available(workbench: Workbench) -> None:
-    """
-    Arrange: a fake Vast.ai whose offer with the lowest price is not available to rent.
-    Act: submit a job.
-    Assert: the job is running, and the instance is from the offer with the next price.
-    """
     workbench.vast.unavailable_offers = {11}
 
     record = workbench.orchestrator.submit(build_spec())
@@ -487,11 +417,6 @@ def test_submit_rents_the_next_offer_when_an_offer_is_not_available(workbench: W
 
 
 def test_submit_with_an_explicit_offer_rents_that_offer_without_a_search(workbench: Workbench) -> None:
-    """
-    Arrange: a job spec whose placement is an explicit offer.
-    Act: submit the job.
-    Assert: the job is running on that offer, and the first request to Vast.ai is the rent request, not a search.
-    """
     record = workbench.orchestrator.submit(build_spec(ExplicitOffer(kind=PlacementKind.offer, offer_id=77)))
 
     assert isinstance(record.status, Running)
@@ -500,11 +425,6 @@ def test_submit_with_an_explicit_offer_rents_that_offer_without_a_search(workben
 
 
 def test_submit_records_a_job_as_aborted_when_no_offer_is_available(workbench: Workbench) -> None:
-    """
-    Arrange: a fake Vast.ai that has no offers.
-    Act: submit a job.
-    Assert: the job is aborted, and no offer is rented.
-    """
     workbench.vast.offers = []
 
     record = workbench.orchestrator.submit(build_spec())
@@ -516,12 +436,6 @@ def test_submit_records_a_job_as_aborted_when_no_offer_is_available(workbench: W
 def test_submit_rejects_a_job_name_that_is_not_finished_and_accepts_it_after_the_job_finished(
     workbench: Workbench,
 ) -> None:
-    """
-    Arrange: a submitted job whose instance is running and whose log has the exit code 0.
-    Act: submit a job with the same name, then sync the first job and submit the job with the same name again.
-    Assert: the submission before the sync raises an error that says the job is not finished, and the submission after
-        the sync gives a running job on a second rented instance.
-    """
     workbench.vast.actual_statuses = iter(["running"])
     workbench.orchestrator.submit(build_spec())
 
@@ -538,12 +452,6 @@ def raise_read_timeout() -> httpx.Response:
 
 
 def test_instance_is_destroyed_when_the_response_of_the_rent_request_is_lost(workbench: Workbench) -> None:
-    """
-    Arrange: a fake Vast.ai that creates the instance for a rent request and then raises a read timeout.
-    Act: submit a job, then sync the job.
-    Assert: the submission raises an error that says the request did not complete, the rented instance is destroyed,
-        and the sync records the job as aborted.
-    """
     workbench.vast.fail_before[("PUT", "asks")] = raise_read_timeout
 
     with pytest.raises(CommandError, match="did not complete"):
@@ -556,12 +464,6 @@ def test_instance_is_destroyed_when_the_response_of_the_rent_request_is_lost(wor
 
 
 def test_sync_keeps_the_job_running_when_observation_raises_an_error(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job, and a fake Vast.ai that returns status 500 for each request for the instance.
-    Act: sync the job.
-    Assert: the sync raises an error that names the status 500, the stored record is the record of the submission, and
-        the instance is not destroyed.
-    """
     submitted = workbench.orchestrator.submit(build_spec())
     workbench.vast.fail_before[("GET", "instances")] = lambda: httpx.Response(500)
 
@@ -573,12 +475,6 @@ def test_sync_keeps_the_job_running_when_observation_raises_an_error(workbench: 
 
 
 def test_rate_limited_request_is_sent_again_after_a_delay(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job, and a fake Vast.ai that returns status 429 two times for the request for the instance and
-        then returns the status running.
-    Act: sync the job.
-    Assert: the job succeeded, and the provider waited 2 seconds and then 4 seconds before it sent the request again.
-    """
     workbench.orchestrator.submit(build_spec())
     responses = iter([httpx.Response(429), httpx.Response(429)])
     workbench.vast.fail_before[("GET", "instances")] = lambda: (
@@ -601,14 +497,6 @@ def test_rate_limited_request_is_sent_again_after_a_delay(workbench: Workbench) 
 def test_abandon_destroys_each_instance_of_the_job_and_records_the_job_as_aborted(
     workbench: Workbench, missing_instance_response: httpx.Response
 ) -> None:
-    """
-    Arrange: a fake Vast.ai that returns an error for a delete request of an instance that is not live, a submitted
-        job without an artifacts directory, a second instance with the label of the job, and an instance of a
-        different job.
-    Act: abandon the job with download, then abandon the job a second time.
-    Assert: the job is aborted, the stored record is the same, only the instance of the different job is live, no
-        download occurred, and the second abandon returns the same record.
-    """
     workbench.vast.missing_instance_response = missing_instance_response
     workbench.orchestrator.submit(build_spec())
     workbench.vast.live_instances |= {502: "llm-lab-job-train", 503: "llm-lab-job-other"}
@@ -623,11 +511,6 @@ def test_abandon_destroys_each_instance_of_the_job_and_records_the_job_as_aborte
 
 
 def test_settings_read_a_keyring_entry_only_for_a_field_with_the_annotation(workbench: Workbench) -> None:
-    """
-    Arrange: keyring entries for the API key, which has the keyring annotation, and for the API URL, which does not.
-    Act: create the settings.
-    Assert: the API key has the value from the keyring, and the API URL has its default value.
-    """
     keyring.set_password("llm-lab", "vast_api_url", "https://wrong.test")
     keyring.set_password("llm-lab", "VAST_API_URL", "https://wrong.test")
 
@@ -640,23 +523,12 @@ def test_settings_read_a_keyring_entry_only_for_a_field_with_the_annotation(work
 def test_settings_prefer_an_environment_variable_to_a_keyring_entry(
     workbench: Workbench, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """
-    Arrange: a keyring entry and an environment variable with different values for the API key.
-    Act: create the settings.
-    Assert: the API key has the value from the environment variable.
-    """
     monkeypatch.setenv("LLM_LAB_VAST_API_KEY", "key-from-environment")
 
     assert Settings().vast_api_key == SecretStr("key-from-environment")
 
 
 def test_cli_rejects_a_vast_command_when_the_api_key_has_no_keyring_entry(workbench: Workbench) -> None:
-    """
-    Arrange: a keyring without the entry for the API key.
-    Act: list the jobs with the CLI, then sync the jobs with the CLI.
-    Assert: the list command exits with code 0, and the sync command exits with code 1 and prints an error that tells
-        the user to set the API key.
-    """
     keyring.delete_password("llm-lab", "VAST_API_KEY")
     overridden = app
 
@@ -669,13 +541,6 @@ def test_cli_rejects_a_vast_command_when_the_api_key_has_no_keyring_entry(workbe
 def test_cli_prompts_for_the_job_name_and_the_manifest_when_they_are_omitted(
     tmp_path: Path, workbench: Workbench
 ) -> None:
-    """
-    Arrange: a submitted job.
-    Act: run the history command of the CLI without a job name and give the name at the prompt, then run the submit
-        command without a manifest and give the path of a file that does not exist at the prompt.
-    Assert: the history command prompts for the job name and prints the two transitions of the job, and the submit
-        command prompts for the manifest file and exits with code 2 and an error that says the file does not exist.
-    """
     workbench.orchestrator.submit(build_spec())
 
     history = CliRunner().invoke(app, ["jobs", "history"], input="train\n", catch_exceptions=False)
@@ -689,11 +554,6 @@ def test_cli_prompts_for_the_job_name_and_the_manifest_when_they_are_omitted(
 
 
 def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
-    """
-    Arrange: a job database that has no job with the name absent.
-    Act: sync the job with the name absent.
-    Assert: the sync raises an error that names the job.
-    """
     with pytest.raises(CommandError, match="absent"):
         workbench.orchestrator.sync("absent")
 
@@ -711,11 +571,6 @@ def test_unknown_job_name_is_rejected(workbench: Workbench) -> None:
     ],
 )
 def test_invalid_manifest_is_rejected(change: dict[str, object]) -> None:
-    """
-    Arrange: the fields of a valid job spec with one change that makes the spec not valid.
-    Act: validate the changed fields as a job spec.
-    Assert: the validation raises a validation error.
-    """
     with pytest.raises(ValidationError):
         JobSpec.model_validate(build_spec().model_dump() | change)
 
@@ -726,16 +581,6 @@ def test_invalid_manifest_is_rejected(change: dict[str, object]) -> None:
 def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
     tmp_path: Path, workbench: Workbench, log_text: str, status_exit_code: int
 ) -> None:
-    """
-    Arrange: a manifest file of a job that uses the secret HF_TOKEN, a keyring without that secret, and a fake Vast.ai
-        whose instance is running and whose log has an exit code.
-    Act: submit the manifest with the CLI, set the secret with the CLI, submit the manifest again, and then run the
-        list, status, sync and history commands of the CLI.
-    Assert: the first submission fails with an error that tells the user to set the secret and sends no request, the
-        secrets command rejects a secret name that is not known, the secret value is not in the output and goes to
-        the rent request, the status command exits with code 0 for a succeeded job and code 1 for a failed job,
-        the history has the pending, the running and the final transitions, and no instance is live.
-    """
     workbench.vast.log_text = log_text
     workbench.vast.actual_statuses = iter(["running"])
     manifest = tmp_path / "job.yaml"
@@ -787,12 +632,6 @@ def test_cli_submits_a_manifest_file_and_reports_the_job_from_the_database(
 
 
 def test_offer_query_filters_on_cuda_13_unless_the_request_sets_another_floor() -> None:
-    """
-    Arrange: a resource request without a minimum CUDA version, and a copy of it with a minimum CUDA version of 13.2.
-    Act: build the offer query of each request.
-    Assert: the query of the first request filters on CUDA 13.0 or higher, and the query of the copy filters on CUDA
-        13.2 or higher.
-    """
     request = ResourceRequest(kind=PlacementKind.resources, gpu_name="RTX 4090", gpu_count=1, max_dollars_per_hour=1.0)
 
     actual = [
@@ -832,12 +671,6 @@ def test_offer_query_filters_on_cuda_13_unless_the_request_sets_another_floor() 
 def test_offer_query_adds_a_clause_for_each_optional_filter_of_the_request(
     update: dict[str, object], expected: dict[str, object]
 ) -> None:
-    """
-    Arrange: a resource request without optional filters, and the same request with zero or more optional filters.
-    Act: build the offer query of each request.
-    Assert: the clauses that are different between the two queries are only the clauses for the optional filters that
-        the second request sets.
-    """
     fields = {"kind": "resources", "gpu_name": "RTX 4090", "gpu_count": 1, "max_dollars_per_hour": 1.0}
     unfiltered = build_offer_query(ResourceRequest.model_validate(fields), 40, 10)
 
@@ -853,11 +686,6 @@ def test_offer_query_adds_a_clause_for_each_optional_filter_of_the_request(
     ids=["include-and-exclude", "unassigned-code", "three-letter-code", "empty-set"],
 )
 def test_resource_request_rejects_an_invalid_country_filter(countries: dict[str, list[str]]) -> None:
-    """
-    Arrange: the fields of a valid resource request and a country filter that is not valid.
-    Act: validate the fields with the country filter as a resource request.
-    Assert: the validation raises a validation error.
-    """
     fields = {"kind": "resources", "gpu_name": "RTX 4090", "gpu_count": 1, "max_dollars_per_hour": 1.0}
 
     with pytest.raises(ValidationError):
@@ -871,13 +699,6 @@ def build_spec_with_artifacts() -> JobSpec:
 def test_instance_receives_the_public_half_of_the_local_identity_and_the_private_half_of_the_pinned_host_key(
     workbench: Workbench,
 ) -> None:
-    """
-    Arrange: a job spec.
-    Act: submit the job.
-    Assert: the rent request has the public key of the local identity file as the authorized key, the known hosts file
-        has the alias of the job and the public key of the host key that the rent request has, and the identity
-        file has the mode 0o600.
-    """
     workbench.orchestrator.submit(build_spec())
 
     environment = json.loads(workbench.vast.requests[-1].content)["env"]
@@ -898,13 +719,6 @@ def test_instance_receives_the_public_half_of_the_local_identity_and_the_private
 
 
 def test_abandon_downloads_the_artifacts_directory_and_then_destroys_the_instance(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job with an artifacts directory.
-    Act: abandon the job with download.
-    Assert: the downloader received the job name, the public SSH endpoint of the instance and the artifacts
-        directory, the result has the local download directory, the job is aborted, the instance is destroyed, and
-        the SSH keys of the job are removed.
-    """
     workbench.orchestrator.submit(build_spec_with_artifacts())
 
     abandonment = workbench.orchestrator.abandon("train", download=True)
@@ -917,12 +731,6 @@ def test_abandon_downloads_the_artifacts_directory_and_then_destroys_the_instanc
 
 
 def test_abandon_keeps_the_job_running_when_the_download_fails(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job with an artifacts directory, and a downloader that raises an error.
-    Act: abandon the job with download.
-    Assert: the abandon raises the error of the downloader, the job is running, the instance is live, and the SSH keys
-        of the job are kept.
-    """
     workbench.orchestrator.submit(build_spec_with_artifacts())
     workbench.downloader.failure = CommandError("rsync exited with status 12")
 
@@ -935,11 +743,6 @@ def test_abandon_keeps_the_job_running_when_the_download_fails(workbench: Workbe
 
 
 def test_abandon_without_download_destroys_the_instance_at_once(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job with an artifacts directory.
-    Act: abandon the job without download.
-    Assert: the downloader received no request, the result has no download directory, and the instance is destroyed.
-    """
     workbench.orchestrator.submit(build_spec_with_artifacts())
 
     abandonment = workbench.orchestrator.abandon("train", download=False)
@@ -948,12 +751,6 @@ def test_abandon_without_download_destroys_the_instance_at_once(workbench: Workb
 
 
 def test_throwaway_keys_are_removed_when_the_job_finishes_or_no_offer_is_available(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job whose instance is running and whose log has the exit code 0.
-    Act: sync the job, then remove all offers and submit the job again.
-    Assert: the SSH keys of the job are removed after the sync, and they are removed after the submission that has no
-        offer.
-    """
     workbench.orchestrator.submit(build_spec())
     workbench.vast.actual_statuses = iter(["running"])
     workbench.orchestrator.sync("train")
@@ -965,11 +762,6 @@ def test_throwaway_keys_are_removed_when_the_job_finishes_or_no_offer_is_availab
 
 
 def test_ssh_endpoint_is_rejected_when_the_instance_does_not_map_the_ssh_port(workbench: Workbench) -> None:
-    """
-    Arrange: a submitted job whose instance maps only a port that is not the SSH port.
-    Act: find the SSH endpoint of the job.
-    Assert: the call raises an error that names the SSH port 2222.
-    """
     workbench.orchestrator.submit(build_spec())
     workbench.vast.ports = {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "40080"}]}
 
@@ -980,14 +772,6 @@ def test_ssh_endpoint_is_rejected_when_the_instance_does_not_map_the_ssh_port(wo
 def test_cli_opens_a_shell_with_the_throwaway_key_and_destroy_reports_the_download(
     workbench: Workbench, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """
-    Arrange: a submitted job with an artifacts directory, a replacement for os.execvp that records its arguments, and a
-        CLI that uses the fake Vast.ai and the fake downloader.
-    Act: run the ssh command of the CLI, then run the destroy command of the CLI.
-    Assert: the ssh command exits with code 0 and runs ssh with the mapped port, the identity file, the known hosts
-        file, strict host key checking, the host key alias, the root user and the public address, and the destroy
-        command exits with code 1, prints the local download directory and destroys the instance.
-    """
     workbench.orchestrator.submit(build_spec_with_artifacts())
     executed: list[list[str]] = []
 
@@ -1037,14 +821,6 @@ def test_cli_opens_a_shell_with_the_throwaway_key_and_destroy_reports_the_downlo
 def test_rsync_downloader_copies_the_remote_directory_through_the_job_ssh_command(
     tmp_path: Path, workbench: Workbench, monkeypatch: pytest.MonkeyPatch, status: int, expected_error: str | None
 ) -> None:
-    """
-    Arrange: a fake rsync program on the PATH that records its arguments and exits with status 0 or with a
-        different status, and the SSH keys of a job.
-    Act: download the artifacts directory of the job with the rsync downloader.
-    Assert: the download returns the local download directory for status 0 and raises an error that names the status
-        for a different status, and rsync received the archive and partial options, the SSH command of the job and
-        the remote and local directories.
-    """
     tools = tmp_path / "tools"
     tools.mkdir()
     recorded = tmp_path / "rsync-arguments"

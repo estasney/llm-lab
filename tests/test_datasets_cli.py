@@ -67,12 +67,6 @@ def build_app(
 
 
 def test_create_generates_while_the_model_is_served_and_publishes_after(journal: Journal, recipe_path: Path) -> None:
-    """
-    Arrange: a CLI with fake services and a hub that has no repository for the dataset.
-    Act: run the create command for the dataset lab/sentences with 4 rows.
-    Assert: the command validates the recipe, reads the dataset, starts the model server, creates 4 rows,
-        stops the model server and then publishes the rows, and the output is the URL of the dataset.
-    """
     cli = build_app(journal, FakeHub(journal), FakeOrchestrator(), None)
 
     output = run_cli(cli, ["datasets", "create", str(recipe_path), "--dataset", "lab/sentences", "--rows", "4"])
@@ -102,13 +96,6 @@ def build_stored_dataset(recipe_source: str) -> StoredDataset:
 
 
 def test_create_adds_rows_to_a_dataset_of_a_recipe_with_other_job_settings(journal: Journal, recipe_path: Path) -> None:
-    """
-    Arrange: a hub with a stored dataset whose recipe is the same, but has a different
-        ttl_seconds_after_finished in the job section.
-    Act: run the create command for that dataset with 4 rows.
-    Assert: the command exits with code 0 and shows the URL of the dataset, and the hub publishes the rows
-        to the stored dataset.
-    """
     stored = build_stored_dataset(build_recipe_source([build_model_config("writer")]).replace("600", "900"))
     hub = FakeHub(journal, repositories={"lab/sentences": stored})
     cli = build_app(journal, hub, FakeOrchestrator(), None)
@@ -124,12 +111,6 @@ def test_create_adds_rows_to_a_dataset_of_a_recipe_with_other_job_settings(journ
 def test_command_starts_nothing_when_the_dataset_has_another_recipe(
     journal: Journal, recipe_path: Path, command: str
 ) -> None:
-    """
-    Arrange: a hub with a stored dataset whose recipe has a different prompt, and a datasets image.
-    Act: run a command that generates rows for that dataset.
-    Assert: the command exits with code 1 and an error that the recipes are different, it only validates
-        the recipe and reads the dataset, and it submits no job.
-    """
     orchestrator = FakeOrchestrator()
     stored = build_stored_dataset(build_recipe_source([build_model_config("writer")], prompt="Name a {{ topic }}."))
     hub = FakeHub(journal, repositories={"lab/sentences": stored})
@@ -148,12 +129,6 @@ def test_command_starts_nothing_when_the_dataset_has_another_recipe(
 
 
 def test_command_reports_a_stored_recipe_that_is_not_valid(journal: Journal, recipe_path: Path) -> None:
-    """
-    Arrange: a hub with a stored dataset whose recipe has only an empty job section.
-    Act: run the create command for that dataset.
-    Assert: the command exits with code 1, the first line of the output tells that the recipe.yaml file of
-        the dataset is not a valid recipe, and the hub publishes nothing.
-    """
     hub = FakeHub(journal, repositories={"lab/sentences": build_stored_dataset("job: {}\n")})
     cli = build_app(journal, hub, FakeOrchestrator(), None)
 
@@ -171,12 +146,6 @@ def test_command_reports_a_stored_recipe_that_is_not_valid(journal: Journal, rec
 def test_command_rejects_a_dataset_that_is_not_a_repository_id(
     journal: Journal, recipe_path: Path, dataset: str
 ) -> None:
-    """
-    Arrange: a dataset value that does not have the form of a Hub repository id <namespace>/<name>
-        with a valid name.
-    Act: run the create command with that dataset value.
-    Assert: the command exits with the usage error code 2 and does no work.
-    """
     cli = build_app(journal, FakeHub(journal), FakeOrchestrator(), None)
 
     exit_code, _ = invoke_cli(cli, ["datasets", "create", str(recipe_path), "--dataset", dataset, "--rows", "4"])
@@ -186,12 +155,6 @@ def test_command_rejects_a_dataset_that_is_not_a_repository_id(
 
 
 def test_command_reports_each_invalid_section_of_a_recipe(journal: Journal, tmp_path: Path) -> None:
-    """
-    Arrange: a recipe file with the section studio, which a recipe does not permit.
-    Act: run the create command with that recipe file.
-    Assert: the command exits with code 1, and the error names the recipe file and shows one line for the
-        section studio with the validation message.
-    """
     recipe_path = tmp_path / "sentences.yaml"
     recipe_path.write_text(build_recipe_source([build_model_config("writer")], studio={"ui": {}}))
     cli = build_app(journal, FakeHub(journal), FakeOrchestrator(), None)
@@ -205,14 +168,6 @@ def test_command_reports_each_invalid_section_of_a_recipe(journal: Journal, tmp_
 def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
     journal: Journal, recipe_path: Path, job_recipe: JobRecipe
 ) -> None:
-    """
-    Arrange: a CLI with a datasets image, a hub that has no repository for the dataset and a fake
-        orchestrator.
-    Act: run the submit command for the dataset lab/sentences with 4 rows.
-    Assert: the orchestrator receives the dataset job of the recipe for that dataset, the rows and the image,
-        the output is a job record with the status running, and the command only validates the recipe and
-        reads the dataset.
-    """
     orchestrator = FakeOrchestrator()
     cli = build_app(journal, FakeHub(journal), orchestrator, "ghcr.io/lab/datasets:1")
 
@@ -231,12 +186,6 @@ def test_submit_starts_a_job_that_runs_the_recipe_in_the_datasets_image(
 def test_submit_stores_local_seeds_and_starts_a_job_that_reads_them_from_the_hub(
     journal: Journal, tmp_path: Path
 ) -> None:
-    """
-    Arrange: a recipe file with a local seed file questions.parquet, and a datasets image.
-    Act: run the submit command for the dataset lab/questions.
-    Assert: the command exits with code 0, it validates the recipe, stores the seeds and reads the dataset
-        in that order, and the recipe in the job has the Hub path of the stored seed file.
-    """
     recipe_path = tmp_path / "questions.yaml"
     seed = {"kind": "local", "path": "questions.parquet"}
     recipe_path.write_text(build_recipe_source([build_model_config("writer")], seed=seed))
@@ -260,12 +209,6 @@ def test_submit_stores_local_seeds_and_starts_a_job_that_reads_them_from_the_hub
 
 
 def test_submit_requires_the_datasets_image(journal: Journal, recipe_path: Path) -> None:
-    """
-    Arrange: a CLI with no datasets image.
-    Act: run the submit command.
-    Assert: the command exits with code 1 and an error that tells how to set the datasets image, and it
-        submits no job.
-    """
     orchestrator = FakeOrchestrator()
     cli = build_app(journal, FakeHub(journal), orchestrator, None)
 
@@ -277,14 +220,6 @@ def test_submit_requires_the_datasets_image(journal: Journal, recipe_path: Path)
 
 
 def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(job_recipe: JobRecipe) -> None:
-    """
-    Arrange: a job recipe.
-    Act: build the dataset job for the dataset lab/sentences with 4 rows and a datasets image.
-    Assert: the job has the name of the dataset, the image, the dataset job command with the dataset and
-        the rows, the recipe and artifacts directory variables, the Hub token as a secret, and the disk,
-        time to live and placement of the recipe. The recipe variable decodes to the recipe source, and
-        the artifacts directory of the job is the value of the artifacts directory variable.
-    """
     spec = build_dataset_job(job_recipe, HubDataset(namespace="lab", name="sentences"), 4, "ghcr.io/lab/datasets:1")
 
     decoded = gzip.decompress(base64.b64decode(spec.environment["LLM_LAB_RECIPE"])).decode()
@@ -308,11 +243,6 @@ def test_dataset_job_carries_the_recipe_and_runs_it_with_the_hub_token(job_recip
 
 
 def test_committed_recipe_schema_matches_the_schema_command() -> None:
-    """
-    Arrange: read the committed file recipes/recipe.schema.json.
-    Act: run the schema command.
-    Assert: the output of the command is equal to the committed file.
-    """
     committed = (Path(__file__).parent.parent / "recipes" / "recipe.schema.json").read_text()
     assert run_cli(app, ["datasets", "schema"]) == committed, (
         "Expected recipes/recipe.schema.json to match the output of llm-lab datasets schema."
