@@ -1,12 +1,9 @@
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 from enum import StrEnum
-from typing import Annotated, Literal, Protocol
+from typing import Literal, Protocol
 
 import httpx
-from pregel_redux import Depends, Scope
 from pydantic import BaseModel
-
-from llm_lab.settings import Settings, get_settings
 
 
 class Role(StrEnum):
@@ -48,15 +45,3 @@ class VllmChatModel:
         response.raise_for_status()
         (choice,) = ChatCompletion.model_validate_json(response.content).choices
         return choice.message.content
-
-
-async def open_chat_model(
-    settings: Annotated[Settings, Depends(get_settings, scope=Scope.run)],
-) -> AsyncIterator[ChatModel]:
-    async with httpx.AsyncClient(
-        base_url=f"{settings.vllm_base_url}/v1", timeout=settings.vllm_request_timeout_seconds
-    ) as http:
-        yield VllmChatModel(http)
-
-
-type ChatModelDep = Annotated[ChatModel, Depends(open_chat_model, scope=Scope.run)]

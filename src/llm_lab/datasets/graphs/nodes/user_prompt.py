@@ -3,7 +3,8 @@ from typing import assert_never
 
 from pydantic import BaseModel
 
-from llm_lab.datasets.graphs.nodes.chat import ChatMessage, ChatModelDep, Role
+from llm_lab.datasets.graphs.nodes.chat import ChatMessage, Role
+from llm_lab.datasets.graphs.nodes.deps import ChatModelDep
 
 
 class PromptKind(StrEnum):

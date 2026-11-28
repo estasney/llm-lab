@@ -7,7 +7,8 @@ import pytest
 from pregel_redux import Endpoint, StateGraph
 from pydantic import BaseModel, ValidationError
 
-from llm_lab.datasets.graphs.nodes.chat import ChatMessage, Role, VllmChatModel, open_chat_model
+from llm_lab.datasets.graphs.nodes.chat import ChatMessage, Role, VllmChatModel
+from llm_lab.datasets.graphs.nodes.deps import open_chat_model
 from llm_lab.datasets.graphs.nodes.user_prompt import (
     PromptKind,
     UserPromptInput,
